@@ -5,7 +5,7 @@
   "description": "AI brand visibility analytics: visibility scores, optimizations, video, Reddit, and search rankings.",
   "version": "1.0.0",
   "repository": {
-    "url": "https://github.com/jonradoff/llmopt",
+    "url": "https://github.com/metavert-io/llmopt",
     "source": "github"
   },
   "homepage": "https://llmopt.metavert.io",

@@ -1,8 +1,8 @@
 # LLM Optimizer
 
-[![Go](https://github.com/jonradoff/llmopt/actions/workflows/ci.yml/badge.svg)](https://github.com/jonradoff/llmopt/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/jonradoff/llmopt/branch/master/graph/badge.svg)](https://codecov.io/gh/jonradoff/llmopt)
-[![Go Report Card](https://goreportcard.com/badge/github.com/jonradoff/llmopt)](https://goreportcard.com/report/github.com/jonradoff/llmopt)
+[![Go](https://github.com/metavert-io/llmopt/actions/workflows/ci.yml/badge.svg)](https://github.com/metavert-io/llmopt/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/metavert-io/llmopt/branch/master/graph/badge.svg)](https://codecov.io/gh/metavert-io/llmopt)
+[![Go Report Card](https://goreportcard.com/badge/github.com/metavert-io/llmopt)](https://goreportcard.com/report/github.com/metavert-io/llmopt)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 LLM Optimizer is an AI visibility intelligence platform. It analyzes how large language models and AI search engines perceive, cite, and recommend brands — then provides research-backed optimization strategies to improve that visibility.
@@ -84,9 +84,9 @@ For the complete research synthesis with methodology details, scoring frameworks
 
 **Backend** — Go 1.24, standard library `net/http` with `gorilla/mux`-style routing. No web framework. LLM provider abstraction supports Anthropic, OpenAI, Gemini, and Grok with streaming SSE responses. Each provider implements a common interface for `Call`, `Stream`, `VerifyKey`, and `BuildStreamBody`.
 
-**Frontend** — React 19 + TypeScript + Vite + Tailwind CSS. Single-page application with SSE streaming for real-time analysis progress. The SaaS deployment uses a frontend overlay system that extends the base [LastSaaS](https://github.com/jonradoff/lastsaas) frontend with product-specific pages.
+**Frontend** — React 19 + TypeScript + Vite + Tailwind CSS. Single-page application with SSE streaming for real-time analysis progress. The SaaS deployment uses a frontend overlay system that extends the base [LastSaaS](https://github.com/metavert-io/lastsaas) frontend with product-specific pages.
 
-**Multi-tenant SaaS** — Built on [LastSaaS](https://github.com/jonradoff/lastsaas), an open-source SaaS framework that provides authentication, billing (Stripe), tenant isolation, and user management. LLM Optimizer runs as a dependent application — LastSaaS handles the auth/billing plane while LLM Optimizer handles the product plane.
+**Multi-tenant SaaS** — Built on [LastSaaS](https://github.com/metavert-io/lastsaas), an open-source SaaS framework that provides authentication, billing (Stripe), tenant isolation, and user management. LLM Optimizer runs as a dependent application — LastSaaS handles the auth/billing plane while LLM Optimizer handles the product plane.
 
 **MCP Server** — [Model Context Protocol](https://modelcontextprotocol.io) server using Streamable HTTP transport with OAuth 2.1 (PKCE + Dynamic Client Registration). Lets AI assistants like Claude access analysis data, visibility scores, and action items programmatically.
 
@@ -98,7 +98,7 @@ For the complete research synthesis with methodology details, scoring frameworks
 - **Node.js 20+** and npm
 - **MongoDB** (Atlas recommended, local works for development)
 - **Anthropic API key** (required — used for site analysis, optimization scoring, and brand intelligence)
-- **[LastSaaS](https://github.com/jonradoff/lastsaas)** (required for SaaS mode with auth/billing; optional for standalone mode)
+- **[LastSaaS](https://github.com/metavert-io/lastsaas)** (required for SaaS mode with auth/billing; optional for standalone mode)
 
 Optional API keys for additional providers and features:
 - **OpenAI API key** — LLM knowledge testing with GPT models
@@ -112,7 +112,7 @@ Optional API keys for additional providers and features:
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/jonradoff/llmopt.git
+   git clone https://github.com/metavert-io/llmopt.git
    cd llmopt
    ```
 
@@ -146,13 +146,13 @@ Optional API keys for additional providers and features:
 
 ### SaaS Mode (multi-tenant with auth and billing)
 
-SaaS mode requires [LastSaaS](https://github.com/jonradoff/lastsaas) as a dependency. LastSaaS provides authentication (OAuth/SSO), Stripe billing, tenant management, and the admin interface.
+SaaS mode requires [LastSaaS](https://github.com/metavert-io/lastsaas) as a dependency. LastSaaS provides authentication (OAuth/SSO), Stripe billing, tenant management, and the admin interface.
 
 1. Clone with the LastSaaS dependency:
    ```bash
-   git clone https://github.com/jonradoff/llmopt.git
+   git clone https://github.com/metavert-io/llmopt.git
    cd llmopt
-   git clone https://github.com/jonradoff/lastsaas.git lastsaas
+   git clone https://github.com/metavert-io/lastsaas.git lastsaas
    ```
 
 2. Configure environment variables:
@@ -167,7 +167,7 @@ SaaS mode requires [LastSaaS](https://github.com/jonradoff/lastsaas) as a depend
    LLMOPT_JWT_ACCESS_SECRET=<random-secret-for-jwt-signing>
    ```
 
-   See the [LastSaaS README](https://github.com/jonradoff/lastsaas#readme) for the full set of auth/billing environment variables (Google OAuth, Stripe keys, etc.).
+   See the [LastSaaS README](https://github.com/metavert-io/lastsaas#readme) for the full set of auth/billing environment variables (Google OAuth, Stripe keys, etc.).
 
 3. For local development, use the start script:
    ```bash

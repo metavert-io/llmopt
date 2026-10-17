@@ -4,15 +4,15 @@
 # hosted LLM Optimizer MCP endpoint at https://llmopt.metavert.io/mcp
 #
 # Usage (with API key):
-#   docker run -i --rm -e API_KEY=lok_xxx ghcr.io/jonradoff/llmopt
+#   docker run -i --rm -e API_KEY=lok_xxx ghcr.io/metavert-io/llmopt
 #
 # Usage (OAuth flow):
-#   docker run -i --rm ghcr.io/jonradoff/llmopt
+#   docker run -i --rm ghcr.io/metavert-io/llmopt
 #
 # MCP client config (Claude Desktop, etc.):
 #   {
 #     "command": "docker",
-#     "args": ["run", "-i", "--rm", "-e", "API_KEY=lok_xxx", "ghcr.io/jonradoff/llmopt"]
+#     "args": ["run", "-i", "--rm", "-e", "API_KEY=lok_xxx", "ghcr.io/metavert-io/llmopt"]
 #   }
 
 FROM node:22-alpine

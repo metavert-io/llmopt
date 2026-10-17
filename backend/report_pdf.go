@@ -307,7 +307,7 @@ func buildReportPDF(
 	pdf.CellFormat(0, 5, "Open-source (MIT) \u2014 install and run it yourself:", "", 1, "C", false, 0, "")
 	pdf.SetFont("Helvetica", "", 8)
 	pdf.SetTextColor(100, 130, 200)
-	pdf.CellFormat(0, 5, "github.com/jonradoff/llmopt", "", 1, "C", false, 0, "")
+	pdf.CellFormat(0, 5, "github.com/metavert-io/llmopt", "", 1, "C", false, 0, "")
 
 	// --- Table of Contents Page ---
 	pdf.AddPage()

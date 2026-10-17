@@ -4,7 +4,7 @@
   "description": "Query your LLM Optimizer brand intelligence data: domains, AI visibility scores, optimization recommendations, YouTube video analysis, Reddit presence, search rankings, and todos.",
   "version": "1.0.0",
   "homepage": "https://llmopt.metavert.io",
-  "repository": "https://github.com/jonradoff/llmopt",
+  "repository": "https://github.com/metavert-io/llmopt",
   "license": "MIT",
   "keywords": ["llm", "seo", "ai-visibility", "brand-intelligence", "optimization"],
   "servers": [
