@@ -251,7 +251,7 @@ func main() {
 	mux.HandleFunc("GET /api/visibility-score/{domain}", withAuth(handleVisibilityScore(mongoDB)))
 
 	// LLM Test
-	mux.HandleFunc("GET /api/providers/models", withAuth(handleListProviderModels()))
+	mux.HandleFunc("GET /api/providers/models", withAuth(handleListProviderModels(mongoDB, encryptionKey, apiKey, saasEnabled)))
 	mux.HandleFunc("POST /api/test", withAuth(withRL(ratelimit.LLMTestLimit, handleLLMTest(mongoDB, encryptionKey, apiKey, saasEnabled))))
 	mux.HandleFunc("GET /api/test/{domain}/history", withAuth(handleGetLLMTestHistory(mongoDB)))
 	mux.HandleFunc("GET /api/test/{domain}/competitors", withAuth(handleGetCompetitorTests(mongoDB)))
@@ -8193,29 +8193,53 @@ func handleGenerateTestQueries(mongoDB *MongoDB) http.HandlerFunc {
 	}
 }
 
-func handleListProviderModels() http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
+// handleListProviderModels lists, per LLM provider, the models the tenant's key
+// can use today (best first), asking each provider live and caching the answer.
+// Providers without a key, or that can't be asked, show the built-in list.
+func handleListProviderModels(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnabled bool) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		type modelInfo struct {
 			ID   string `json:"id"`
 			Name string `json:"name"`
 		}
 		type providerModels struct {
-			ID     string      `json:"id"`
-			Name   string      `json:"name"`
-			Models []modelInfo `json:"models"`
+			ID      string      `json:"id"`
+			Name    string      `json:"name"`
+			Models  []modelInfo `json:"models"`
+			Default string      `json:"default,omitempty"` // the best model available
+			Live    bool        `json:"live"`              // true when the list came from the provider
 		}
-		var result []providerModels
+		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
+		defer cancel()
+
+		var ids []string
 		for _, pid := range validProviderIDs() {
-			p := getProvider(pid)
-			if p == nil {
-				continue
+			if getProvider(pid) != nil {
+				ids = append(ids, pid)
 			}
-			var models []modelInfo
-			for _, m := range p.Models() {
-				models = append(models, modelInfo{ID: m.ID, Name: m.Name})
-			}
-			result = append(result, providerModels{ID: pid, Name: p.Name(), Models: models})
 		}
+		result := make([]providerModels, len(ids))
+		var wg sync.WaitGroup
+		for i, pid := range ids {
+			wg.Add(1)
+			go func(i int, p LLMProvider) {
+				defer wg.Done()
+				key, err := resolveProviderKey(ctx, mongoDB, encKey, fallbackKey, saasEnabled, p.ProviderID())
+				if err != nil {
+					key = ""
+				}
+				models, live := availableModels(ctx, p, key)
+				pm := providerModels{ID: p.ProviderID(), Name: p.Name(), Live: live, Models: []modelInfo{}}
+				for _, m := range models {
+					pm.Models = append(pm.Models, modelInfo{ID: m.ID, Name: m.Name})
+				}
+				if len(models) > 0 {
+					pm.Default = models[0].ID
+				}
+				result[i] = pm
+			}(i, getProvider(pid))
+		}
+		wg.Wait()
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(result)
 	}
@@ -8365,7 +8389,7 @@ func handleDeleteLLMTest(mongoDB *MongoDB) http.HandlerFunc {
 
 func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Generous budget: Phase 1 runs many provider calls (now in parallel) plus
+		// Generous budget: Phase 1 runs many provider calls (in parallel) plus
 		// a large evaluation pass. 15 min leaves headroom for big provider matrices.
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
 		defer cancel()
@@ -8409,44 +8433,74 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			return
 		}
 
-		// Validate providers and resolve API keys
-		type providerWithKey struct {
-			provider LLMProvider
-			apiKey   string
-		}
-		var providerKeys []providerWithKey
-		for _, pid := range req.Providers {
-			p := getProvider(pid)
-			if p == nil {
-				sendSSE(w, flusher, "error", map[string]string{"message": fmt.Sprintf("Unknown provider: %s", pid)})
-				return
-			}
-			key, err := resolveProviderKey(r.Context(), mongoDB, encKey, fallbackKey, saasEnabled, pid)
-			if err != nil {
-				sendSSE(w, flusher, "error", map[string]string{"message": fmt.Sprintf("No API key configured for %s", p.Name())})
-				return
-			}
-			providerKeys = append(providerKeys, providerWithKey{provider: p, apiKey: key})
+		notify := func(msg string) {
+			sendSSE(w, flusher, "status", map[string]string{"message": msg})
 		}
 
-		// Resolve the LLM used for the evaluation pass (Phase 2) up front, so we
-		// fail fast instead of after running every query. Prefer the tenant's
-		// primary provider; if it has no usable key, fall back to one of the
-		// providers we just validated for this test (its key is known good).
-		evalProvider, evalKey, _, primErr := resolvePrimaryLLM(r.Context(), mongoDB, encKey, fallbackKey, saasEnabled)
-		if primErr != nil {
-			if !errors.Is(primErr, errAPIKeyRequired) {
-				// A real DB/context failure — surface it instead of pretending a
-				// key is missing, and don't silently fall through.
-				log.Printf("LLM test: failed to resolve primary LLM: %v", primErr)
+		// Resolve each provider's key. A provider that can't be used is noted and
+		// skipped rather than failing the whole test: the others still answer.
+		var runs []*testProviderRun
+		var unavailable []LLMTestUnavailable
+		seen := map[string]bool{}
+		for _, pid := range req.Providers {
+			if seen[pid] {
+				continue
 			}
-			if len(providerKeys) > 0 {
-				evalProvider = providerKeys[0].provider
-				evalKey = providerKeys[0].apiKey
-			} else {
-				sendSSE(w, flusher, "error", map[string]string{"message": "No API key available to evaluate results. Add an API key for your primary provider (or one of the providers you're testing) in Settings."})
-				return
+			seen[pid] = true
+			p := getProvider(pid)
+			if p == nil {
+				unavailable = append(unavailable, LLMTestUnavailable{ProviderID: pid, ProviderName: pid, Reason: "it isn't a supported provider"})
+				continue
 			}
+			key, err := resolveProviderKey(r.Context(), mongoDB, encKey, fallbackKey, saasEnabled, pid)
+			if err != nil || key == "" {
+				reason := "no API key is configured for it"
+				if err != nil && !errors.Is(err, errAPIKeyRequired) {
+					log.Printf("LLM test: resolving %s key: %v", pid, err)
+					reason = "its saved API key couldn't be read"
+				}
+				unavailable = append(unavailable, LLMTestUnavailable{ProviderID: pid, ProviderName: p.Name(), Reason: reason})
+				notify(fmt.Sprintf("Skipping %s: %s.", p.Name(), reason))
+				continue
+			}
+			runs = append(runs, &testProviderRun{provider: p, apiKey: key, notify: notify})
+		}
+		if len(runs) == 0 {
+			sendSSE(w, flusher, "error", map[string]string{
+				"message": "None of the selected providers can be used: " + describeUnavailable(unavailable) + ". Add or fix their API keys in Settings.",
+			})
+			return
+		}
+
+		// Pick each provider's model from what its key can use today, best first.
+		var wg sync.WaitGroup
+		for _, run := range runs {
+			wg.Add(1)
+			go func(run *testProviderRun) {
+				defer wg.Done()
+				models, _ := availableModels(r.Context(), run.provider, run.apiKey)
+				requested := req.Models[run.provider.ProviderID()]
+				ordered, found := testModelOrder(models, requested)
+				if !found && len(ordered) > 0 {
+					notify(fmt.Sprintf("%s: %s isn't offered to this API key any more; using %s instead.", run.provider.Name(), requested, ordered[0].Name))
+				}
+				run.models = ordered
+			}(run)
+		}
+		wg.Wait()
+		usable := runs[:0]
+		for _, run := range runs {
+			if len(run.models) == 0 {
+				unavailable = append(unavailable, LLMTestUnavailable{ProviderID: run.provider.ProviderID(), ProviderName: run.provider.Name(), Reason: "no models are available to its API key"})
+				continue
+			}
+			usable = append(usable, run)
+			notify(fmt.Sprintf("%s will answer with %s.", run.provider.Name(), run.models[0].Name))
+		}
+		runs = usable
+		if len(runs) == 0 {
+			sendSSE(w, flusher, "error", map[string]string{"message": "None of the selected providers can be used: " + describeUnavailable(unavailable) + "."})
+			return
 		}
 
 		// Look up brand context
@@ -8461,115 +8515,206 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			}
 		}
 
-		totalCalls := len(req.Providers) * len(req.Queries)
-		completedCalls := 0
-
-		sendSSE(w, flusher, "status", map[string]string{
-			"message": fmt.Sprintf("Testing %d queries across %d providers (%d total calls)...", len(req.Queries), len(req.Providers), totalCalls),
-		})
-
-		// Phase 1: Query each provider with each query. Calls run concurrently
-		// (capped) so a large provider×query matrix finishes in roughly the time
-		// of the slowest single call instead of the sum of all of them — which is
-		// what previously pushed long runs past the request timeout.
+		// Phase 1: ask every provider every query. Calls run concurrently (capped),
+		// interleaved across providers so one slow or rate-limited provider doesn't
+		// hold up the rest. Per-call failures are recorded, never fatal.
 		type queryJob struct {
-			provider LLMProvider
-			apiKey   string
-			model    ModelDef
+			run      *testProviderRun
 			queryIdx int
 			query    string
 		}
 		var jobs []queryJob
-		for _, pk := range providerKeys {
-			// Use model override if specified, otherwise use primary model
-			model := pk.provider.Models()[0]
-			if overrideID, ok := req.Models[pk.provider.ProviderID()]; ok && overrideID != "" {
-				for _, m := range pk.provider.Models() {
-					if m.ID == overrideID {
-						model = m
-						break
-					}
-				}
-			}
-			for qi, q := range req.Queries {
-				jobs = append(jobs, queryJob{provider: pk.provider, apiKey: pk.apiKey, model: model, queryIdx: qi, query: q.Query})
+		for qi, q := range req.Queries {
+			for _, run := range runs {
+				jobs = append(jobs, queryJob{run: run, queryIdx: qi, query: q.Query})
 			}
 		}
+		totalCalls := len(jobs)
+		notify(fmt.Sprintf("Testing %d queries across %d providers (%d total calls)...", len(req.Queries), len(runs), totalCalls))
 
 		responses := make([]testRawResponse, 0, totalCalls)
 		var respMu sync.Mutex
+		completedCalls := 0
 
 		var g errgroup.Group
 		g.SetLimit(6) // cap concurrent provider calls to stay within BYOK rate limits
 		for _, j := range jobs {
 			j := j
 			g.Go(func() error {
-				resp, err := j.provider.Call(r.Context(), j.apiKey, j.model.ID, j.query, 4096)
+				resp, model, err, skipped := j.run.ask(r.Context(), j.query, 4096)
+				j.run.record(err)
 				respMu.Lock()
 				completedCalls++
 				n := completedCalls
 				responses = append(responses, testRawResponse{
-					providerID:   j.provider.ProviderID(),
-					providerName: j.provider.Name(),
-					model:        j.model.Name,
+					providerID:   j.run.provider.ProviderID(),
+					providerName: j.run.provider.Name(),
+					model:        model.Name,
 					queryIdx:     j.queryIdx,
 					response:     resp,
 					err:          err,
 				})
 				respMu.Unlock()
-				sendSSE(w, flusher, "status", map[string]string{
-					"message": fmt.Sprintf("[%d/%d] %s (%s): \"%s\"", n, totalCalls, j.provider.Name(), j.model.Name, truncateStr(j.query, 60)),
-				})
-				return nil // per-call errors are captured in the response, never abort the group
+				if skipped {
+					return nil
+				}
+				outcome := ""
+				if err != nil {
+					outcome = " — no answer"
+				}
+				notify(fmt.Sprintf("[%d/%d] %s (%s): \"%s\"%s", n, totalCalls, j.run.provider.Name(), model.Name, truncateStr(j.query, 60), outcome))
+				return nil
 			})
 		}
 		_ = g.Wait()
+		if r.Context().Err() != nil {
+			return // client went away or the budget ran out
+		}
 
-		// Phase 2: Evaluate all responses using the eval LLM resolved up front
-		sendSSE(w, flusher, "status", map[string]string{
-			"message": "Evaluating responses against brand profile...",
-		})
+		// Providers that answered nothing are reported, not scored as zero.
+		var active []*testProviderRun
+		var failedNames []string
+		dead := map[string]bool{}
+		for _, run := range runs {
+			if run.answered > 0 {
+				active = append(active, run)
+				continue
+			}
+			dead[run.provider.ProviderID()] = true
+			failedNames = append(failedNames, run.provider.Name())
+			unavailable = append(unavailable, LLMTestUnavailable{
+				ProviderID:   run.provider.ProviderID(),
+				ProviderName: run.provider.Name(),
+				Model:        run.currentModel().Name,
+				Reason:       providerFailureReason(run.lastErr),
+			})
+		}
+		if len(active) == 0 {
+			sendSSE(w, flusher, "error", map[string]string{
+				"message": "No provider could answer: " + describeUnavailable(unavailable) + ".",
+			})
+			return
+		}
+		if len(failedNames) > 0 {
+			var okNames []string
+			for _, run := range active {
+				okNames = append(okNames, run.provider.Name())
+			}
+			notify(fmt.Sprintf("Continuing with %s; %s couldn't answer.", joinNames(okNames), joinNames(failedNames)))
+		}
 
-		// Build evaluation prompt
+		// Phase 2: evaluate the answers. Try the tenant's primary provider first,
+		// then the providers that just answered (their keys are known to work).
 		evalPrompt := buildTestEvaluationPrompt(brandName, req.Domain, brandInfo, req.Queries, responses)
+		type evalCandidate struct {
+			provider LLMProvider
+			apiKey   string
+			model    string
+		}
+		// evalModelFor avoids a model this run already found retired.
+		evalModelFor := func(p LLMProvider, key, preferred string) string {
+			m := pickEvalModel(r.Context(), p, key, preferred)
+			for _, run := range active {
+				if run.provider.ProviderID() == p.ProviderID() && run.apiKey == key && run.movedPast(m) {
+					return run.currentModel().ID
+				}
+			}
+			return m
+		}
+		var cands []evalCandidate
+		primary, primKey, primModel, primErr := resolvePrimaryLLM(r.Context(), mongoDB, encKey, fallbackKey, saasEnabled)
+		if primErr == nil && primary != nil && primKey != "" && !dead[primary.ProviderID()] {
+			cands = append(cands, evalCandidate{primary, primKey, evalModelFor(primary, primKey, primModel)})
+		} else if primErr != nil && !errors.Is(primErr, errAPIKeyRequired) {
+			log.Printf("LLM test: failed to resolve primary LLM: %v", primErr)
+		}
+		byAnswers := append([]*testProviderRun(nil), active...)
+		sort.SliceStable(byAnswers, func(i, j int) bool { return byAnswers[i].answered > byAnswers[j].answered })
+		for _, run := range byAnswers {
+			if len(cands) > 0 && cands[0].provider.ProviderID() == run.provider.ProviderID() && cands[0].apiKey == run.apiKey {
+				continue
+			}
+			cands = append(cands, evalCandidate{run.provider, run.apiKey, evalModelFor(run.provider, run.apiKey, "")})
+		}
 
-		evalModel := evalProvider.Models()[0].ID
-		evalResp, err := evalProvider.Call(r.Context(), evalKey, evalModel, evalPrompt, 16384)
-		if err != nil {
-			sendSSE(w, flusher, "error", map[string]string{"message": "Evaluation failed: " + err.Error()})
+		var evalResult testEvaluation
+		var evalErrs []string
+		evaluated := false
+		for _, c := range cands {
+			notify(fmt.Sprintf("Evaluating responses against brand profile (%s)...", c.provider.Name()))
+			evalResp, err := callWithRetry(r.Context(), c.provider, c.apiKey, c.model, evalPrompt, 16384)
+			if err != nil && classifyProviderError(err) == failModel {
+				// The chosen model is gone; try the best one this key can use.
+				if models, _ := availableModels(r.Context(), c.provider, c.apiKey); len(models) > 0 && models[0].ID != c.model {
+					evalResp, err = callWithRetry(r.Context(), c.provider, c.apiKey, models[0].ID, evalPrompt, 16384)
+				}
+			}
+			if err != nil {
+				log.Printf("LLM test evaluation with %s (%s) failed: %v", c.provider.Name(), c.model, err)
+				evalErrs = append(evalErrs, fmt.Sprintf("%s: %s", c.provider.Name(), truncateStr(err.Error(), 200)))
+				continue
+			}
+			if err := parseTestEvaluation(evalResp, &evalResult); err != nil {
+				log.Printf("LLM test evaluation from %s unreadable: %v — raw: %s", c.provider.Name(), err, truncateStr(evalResp, 200))
+				evalErrs = append(evalErrs, fmt.Sprintf("%s: the evaluation couldn't be read", c.provider.Name()))
+				continue
+			}
+			evaluated = true
+			break
+		}
+		if !evaluated {
+			msg := "Evaluation failed: " + strings.Join(evalErrs, "; ")
+			if len(cands) == 0 {
+				msg = "No API key available to evaluate results. Add an API key for your primary provider (or one of the providers you're testing) in Settings."
+			}
+			sendSSE(w, flusher, "error", map[string]string{"message": msg})
 			return
 		}
 
-		// Parse evaluation results
-		evalJSON := stripJSONFencing(evalResp)
-		var evalResult struct {
-			Evaluations []struct {
-				QueryIndex  int    `json:"query_index"`
-				ProviderID  string `json:"provider_id"`
-				Mentioned   bool   `json:"mentioned"`
-				Recommended bool   `json:"recommended"`
-				Sentiment   string `json:"sentiment"`
-				Accuracy    string `json:"accuracy"`
-				Score       int    `json:"score"`
-			} `json:"evaluations"`
+		// Index the evaluations by query and provider. Evaluators sometimes give
+		// the provider's name instead of its ID, so accept either.
+		idByName := map[string]string{}
+		for _, run := range runs {
+			idByName[strings.ToLower(run.provider.Name())] = run.provider.ProviderID()
+			idByName[strings.ToLower(run.provider.ProviderID())] = run.provider.ProviderID()
 		}
-		if err := json.Unmarshal([]byte(evalJSON), &evalResult); err != nil {
-			log.Printf("Failed to parse evaluation result: %v — raw: %s", err, evalJSON[:min(200, len(evalJSON))])
-			sendSSE(w, flusher, "error", map[string]string{"message": "Failed to parse evaluation results"})
-			return
+		type evalKey struct {
+			queryIdx   int
+			providerID string
 		}
-
-		// Build structured results
-		queryResults := make([]LLMTestQueryResult, len(req.Queries))
-		for qi, q := range req.Queries {
-			queryResults[qi] = LLMTestQueryResult{
-				Query:           q,
-				ProviderResults: []LLMTestProviderResult{},
+		evals := map[evalKey]int{}
+		for i, e := range evalResult.Evaluations {
+			if pid, ok := idByName[strings.ToLower(strings.TrimSpace(e.ProviderID))]; ok {
+				evals[evalKey{e.QueryIndex, pid}] = i
 			}
 		}
 
-		// Map responses into query results
+		// Build per-query results for the providers that answered, in the order
+		// the providers were selected.
+		order := map[string]int{}
+		for i, run := range runs {
+			order[run.provider.ProviderID()] = i
+		}
+		sort.SliceStable(responses, func(i, j int) bool {
+			if responses[i].queryIdx != responses[j].queryIdx {
+				return responses[i].queryIdx < responses[j].queryIdx
+			}
+			return order[responses[i].providerID] < order[responses[j].providerID]
+		})
+		queryResults := make([]LLMTestQueryResult, len(req.Queries))
+		for qi, q := range req.Queries {
+			queryResults[qi] = LLMTestQueryResult{Query: q, ProviderResults: []LLMTestProviderResult{}}
+		}
+		type tally struct{ score, mentioned, recommended, accurate, sentiment, answered int }
+		tallies := map[string]*tally{}
+		for _, run := range active {
+			tallies[run.provider.ProviderID()] = &tally{}
+		}
 		for _, resp := range responses {
+			t := tallies[resp.providerID]
+			if t == nil {
+				continue // provider answered nothing; listed as unavailable instead
+			}
 			pr := LLMTestProviderResult{
 				ProviderID:   resp.providerID,
 				ProviderName: resp.providerName,
@@ -8577,97 +8722,61 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 				Response:     resp.response,
 			}
 			if resp.err != nil {
-				pr.Response = fmt.Sprintf("Error: %s", resp.err.Error())
+				pr.Response = "Error: " + truncateStr(resp.err.Error(), 300)
 				pr.Sentiment = "absent"
 				pr.Accuracy = "not_applicable"
+			} else {
+				t.answered++
+				if i, ok := evals[evalKey{resp.queryIdx, resp.providerID}]; ok {
+					e := evalResult.Evaluations[i]
+					pr.Mentioned, pr.Recommended = e.Mentioned, e.Recommended
+					pr.Sentiment, pr.Accuracy, pr.Score = e.Sentiment, e.Accuracy, e.Score
+				}
+				t.score += pr.Score
+				if pr.Mentioned {
+					t.mentioned++
+				}
+				if pr.Recommended {
+					t.recommended++
+				}
+				if pr.Accuracy == "accurate" {
+					t.accurate++
+				}
+				switch pr.Sentiment {
+				case "positive":
+					t.sentiment += 100
+				case "neutral":
+					t.sentiment += 50
+				case "negative":
+					t.sentiment += 10
+				}
 			}
 			queryResults[resp.queryIdx].ProviderResults = append(queryResults[resp.queryIdx].ProviderResults, pr)
 		}
 
-		// Apply evaluation scores to results
-		for _, eval := range evalResult.Evaluations {
-			if eval.QueryIndex < 0 || eval.QueryIndex >= len(queryResults) {
-				continue
-			}
-			qr := &queryResults[eval.QueryIndex]
-			for i := range qr.ProviderResults {
-				if qr.ProviderResults[i].ProviderID == eval.ProviderID {
-					qr.ProviderResults[i].Mentioned = eval.Mentioned
-					qr.ProviderResults[i].Recommended = eval.Recommended
-					qr.ProviderResults[i].Sentiment = eval.Sentiment
-					qr.ProviderResults[i].Accuracy = eval.Accuracy
-					qr.ProviderResults[i].Score = eval.Score
-					break
-				}
-			}
-		}
-
-		// Compute per-provider summaries
-		summaryMap := map[string]*LLMTestSummary{}
-		for _, pk := range providerKeys {
-			modelName := pk.provider.Models()[0].Name
-			if overrideID, ok := req.Models[pk.provider.ProviderID()]; ok && overrideID != "" {
-				for _, m := range pk.provider.Models() {
-					if m.ID == overrideID {
-						modelName = m.Name
-						break
-					}
-				}
-			}
-			summaryMap[pk.provider.ProviderID()] = &LLMTestSummary{
-				ProviderID:   pk.provider.ProviderID(),
-				ProviderName: pk.provider.Name(),
-				Model:        modelName,
-			}
-		}
-
-		for _, qr := range queryResults {
-			for _, pr := range qr.ProviderResults {
-				s := summaryMap[pr.ProviderID]
-				if s == nil {
-					continue
-				}
-				s.OverallScore += pr.Score
-				if pr.Mentioned {
-					s.MentionRate++
-				}
-				if pr.Recommended {
-					s.RecommendRate++
-				}
-				if pr.Accuracy == "accurate" {
-					s.AccuracyRate++
-				}
-				switch pr.Sentiment {
-				case "positive":
-					s.SentimentScore += 100
-				case "neutral":
-					s.SentimentScore += 50
-				case "negative":
-					s.SentimentScore += 10
-				}
-			}
-		}
-
-		numQueries := len(req.Queries)
+		// Per-provider summaries; rates are over the queries each provider answered.
 		var summaries []LLMTestSummary
 		overallTotal := 0
-		for _, pid := range req.Providers {
-			s := summaryMap[pid]
-			if numQueries > 0 {
-				s.OverallScore = s.OverallScore / numQueries
-				s.MentionRate = s.MentionRate * 100 / numQueries
-				s.RecommendRate = s.RecommendRate * 100 / numQueries
-				s.AccuracyRate = s.AccuracyRate * 100 / numQueries
-				s.SentimentScore = s.SentimentScore / numQueries
+		for _, run := range active {
+			t := tallies[run.provider.ProviderID()]
+			s := LLMTestSummary{
+				ProviderID:   run.provider.ProviderID(),
+				ProviderName: run.provider.Name(),
+				Model:        run.currentModel().Name,
+				Answered:     t.answered,
+				Failed:       run.failed,
+			}
+			if n := t.answered; n > 0 {
+				s.OverallScore = t.score / n
+				s.MentionRate = t.mentioned * 100 / n
+				s.RecommendRate = t.recommended * 100 / n
+				s.AccuracyRate = t.accurate * 100 / n
+				s.SentimentScore = t.sentiment / n
 			}
 			overallTotal += s.OverallScore
-			summaries = append(summaries, *s)
+			summaries = append(summaries, s)
 		}
-
-		overallScore := 0
-		if len(summaries) > 0 {
-			overallScore = overallTotal / len(summaries)
-		}
+		overallScore := overallTotal / len(summaries)
 
 		// Determine run number
 		runNumber := 1
@@ -8682,17 +8791,18 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 		runCancel()
 
 		test := LLMTest{
-			TenantID:          saas.TenantIDFromContext(r.Context()),
-			Domain:            req.Domain,
-			BrandName:         brandName,
-			RunNumber:         runNumber,
-			CompetitorOf:      normalizeDomain(req.CompetitorOf),
-			Queries:           req.Queries,
-			Results:           queryResults,
-			ProviderSummaries: summaries,
-			OverallScore:      overallScore,
-			BrandContextUsed:  brandInfo.Used,
-			GeneratedAt:       time.Now(),
+			TenantID:             saas.TenantIDFromContext(r.Context()),
+			Domain:               req.Domain,
+			BrandName:            brandName,
+			RunNumber:            runNumber,
+			CompetitorOf:         normalizeDomain(req.CompetitorOf),
+			Queries:              req.Queries,
+			Results:              queryResults,
+			ProviderSummaries:    summaries,
+			UnavailableProviders: unavailable,
+			OverallScore:         overallScore,
+			BrandContextUsed:     brandInfo.Used,
+			GeneratedAt:          time.Now(),
 		}
 
 		// Save to DB (insert new document for history tracking)
@@ -8705,15 +8815,21 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			test.ID = oid
 		}
 
-		sendSSE(w, flusher, "status", map[string]string{
-			"message": fmt.Sprintf("Test complete — Overall Score: %d/100", overallScore),
-		})
+		doneMsg := fmt.Sprintf("Test complete — Overall Score: %d/100", overallScore)
+		if len(unavailable) > 0 {
+			var names []string
+			for _, u := range unavailable {
+				names = append(names, u.ProviderName)
+			}
+			doneMsg += fmt.Sprintf(" (from the providers that answered; %s couldn't be used)", joinNames(names))
+		}
+		notify(doneMsg)
 
 		testJSON, _ := json.Marshal(test)
 		sendSSE(w, flusher, "done", map[string]any{
 			"result": string(testJSON),
 		})
-		trackServerEvent(mongoDB, "custom.server.test.complete", saas.UserIDFromContext(r.Context()), saas.TenantIDFromContext(r.Context()), map[string]interface{}{"domain": req.Domain, "duration_ms": time.Since(startTime).Milliseconds(), "provider_count": len(req.Providers), "query_count": len(req.Queries)})
+		trackServerEvent(mongoDB, "custom.server.test.complete", saas.UserIDFromContext(r.Context()), saas.TenantIDFromContext(r.Context()), map[string]interface{}{"domain": req.Domain, "duration_ms": time.Since(startTime).Milliseconds(), "provider_count": len(req.Providers), "query_count": len(req.Queries), "unavailable_count": len(unavailable)})
 	}
 }
 
@@ -8892,11 +9008,11 @@ For each query-response pair, evaluate:
 		if resp.err != nil {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf(`### Query %d (asked to %s)
+		sb.WriteString(fmt.Sprintf(`### Query %d (asked to %s, provider_id: %s)
 **Query**: %s
 **Response**: %s
 
-`, resp.queryIdx, resp.providerName, queries[resp.queryIdx].Query, resp.response))
+`, resp.queryIdx, resp.providerName, resp.providerID, queries[resp.queryIdx].Query, resp.response))
 	}
 
 	sb.WriteString(`## Output Format

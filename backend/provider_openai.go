@@ -33,12 +33,23 @@ func (p *OpenAIProvider) SmallModel() string {
 	return "gpt-4o-mini"
 }
 
+// openaiOutputBudget returns max_output_tokens for a Responses API call. Reasoning
+// models spend part of the budget thinking, so they get extra room.
+func openaiOutputBudget(model string, maxTokens int) int {
+	if isOpenAIReasoningModel(model) {
+		return maxTokens + reasoningHeadroom
+	}
+	return maxTokens
+}
+
+// The Responses API takes "input" and "max_output_tokens" (not the Chat
+// Completions "messages" and "max_tokens", which it rejects).
 func (p *OpenAIProvider) BuildStreamBody(model string, maxTokens int, prompt string, useWebSearch bool) ([]byte, error) {
 	body := map[string]any{
-		"model":      model,
-		"max_tokens": maxTokens,
-		"stream":     true,
-		"messages": []map[string]any{
+		"model":             model,
+		"max_output_tokens": openaiOutputBudget(model, maxTokens),
+		"stream":            true,
+		"input": []map[string]any{
 			{"role": "user", "content": prompt},
 		},
 	}
@@ -52,9 +63,9 @@ func (p *OpenAIProvider) BuildStreamBody(model string, maxTokens int, prompt str
 
 func (p *OpenAIProvider) Call(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
 	body, _ := json.Marshal(map[string]any{
-		"model":      model,
-		"max_tokens": maxTokens,
-		"messages": []map[string]any{
+		"model":             model,
+		"max_output_tokens": openaiOutputBudget(model, maxTokens),
+		"input": []map[string]any{
 			{"role": "user", "content": prompt},
 		},
 	})
@@ -72,13 +83,16 @@ func (p *OpenAIProvider) Call(ctx context.Context, apiKey, model, prompt string,
 	}
 	defer resp.Body.Close()
 
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == 429 || resp.StatusCode == 529 {
+		// A 429 for an exhausted quota is a billing problem, not a busy server.
+		if resp.StatusCode == 429 && isBillingMessage(strings.ToLower(string(respBody))) {
+			return "", &ProviderHTTPError{Provider: "OpenAI", Status: resp.StatusCode, Body: string(respBody)}
+		}
 		return "", ErrOverloaded
 	}
-
-	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("OpenAI API error (%d): %s", resp.StatusCode, string(respBody))
+		return "", &ProviderHTTPError{Provider: "OpenAI", Status: resp.StatusCode, Body: string(respBody)}
 	}
 
 	// OpenAI Responses API format
@@ -216,8 +230,12 @@ func (p *OpenAIProvider) VerifyKey(ctx context.Context, apiKey string) (string, 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	model, status := verifyModelFor(ctx, p, apiKey)
+	if status != "" {
+		return status, nil
+	}
 	body, _ := json.Marshal(map[string]any{
-		"model": "gpt-4o-mini",
+		"model": model,
 		"input": "Reply with just the word 'ok'.",
 	})
 

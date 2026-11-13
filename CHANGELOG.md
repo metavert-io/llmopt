@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-13
+
+- **LLM Test**: a provider that can't be used no longer stops the test. Providers without a key are skipped with a note. A provider whose key is rejected or out of credit is dropped after its first failure, and the rest of its queries are skipped. Rate-limit and overload errors are retried with backoff. A retired model makes the run switch to the provider's next model. Providers that answered nothing are listed in a new `unavailable_providers` field (shown on the results page and in the PDF) instead of counting as zero in the overall score. Per-provider rates are now computed over the queries that provider answered (`answered`/`failed`).
+- **LLM Test**: the evaluation step falls back to another provider that just answered when the primary provider can't evaluate, and reads evaluator output wrapped in prose or code fences.
+- **Models**: the model list for each provider is now fetched live from the provider (Anthropic, OpenAI, Gemini, xAI `models` endpoints) for the tenant's own key, cached for 6 hours, and ranked best first. The LLM Test defaults to the best available model. The built-in lists remain as a fallback.
+- **API keys**: key checks list the provider's models first and test with the cheapest current one, so a retired model no longer makes a valid key look broken. The LLM Test page shows keys whose last check failed, with a Re-check button, instead of hiding them.
+- **OpenAI**: requests to the Responses API now send `input` and `max_output_tokens` (they were sending the Chat Completions `messages`/`max_tokens` fields). Reasoning models (GPT-5, o-series), Gemini 2.5+ thinking models and Grok reasoning models get extra output budget so their reasoning doesn't use up the answer. Exhausted OpenAI quota is reported as a billing problem, not as an overload.
+- **Gemini**: the API key is sent in the `x-goog-api-key` header instead of the URL, so it can't appear in error text. Multi-part answers are joined.
+- **Cold starts**: Caddy now holds requests for up to 45s while the backends start (`lb_try_duration`), and buffers llmopt request bodies so a POST that arrives during startup is replayed instead of failing with 502. WARP connects in the background so the app starts immediately, and the WARP check is retried instead of being cached as unavailable. The frontend retries a test start on 502/503/504 with a "waking up" note, and explains other failures (rate limit, expired session) instead of showing "Failed to start test".
+- **LLM Test**: fixed the model picker being ignored (stale `testModelSelections` in the run callback).
+
 ## 2026-06-18
 
 - **LLM Test**: added a periodic SSE heartbeat to all 15 streaming endpoints, keeping the connection alive through long, silent LLM calls. Fixes the "Load Failed" error that dropped the Test stream mid-run behind the production proxy chain (Fly edge -> Caddy).

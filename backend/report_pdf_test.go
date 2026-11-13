@@ -462,6 +462,29 @@ func TestBuildReportPDF_WithLLMTest(t *testing.T) {
 	}
 }
 
+func TestBuildReportPDF_WithUnavailableProviders(t *testing.T) {
+	llmTest := &LLMTest{
+		Domain:       "example.com",
+		BrandName:    "Test Brand",
+		OverallScore: 70,
+		ProviderSummaries: []LLMTestSummary{
+			{ProviderID: "anthropic", ProviderName: "Anthropic", Model: "Claude Opus 5.5", OverallScore: 70, Answered: 11, Failed: 1},
+		},
+		UnavailableProviders: []LLMTestUnavailable{
+			{ProviderID: "grok", ProviderName: "Grok", Reason: "the API key is out of credits or has a billing problem"},
+			{ProviderID: "gemini", ProviderName: "Gemini", Reason: "no API key is configured for it"},
+		},
+		GeneratedAt: time.Now(),
+	}
+	pdfBytes, err := buildReportPDF("example.com", nil, nil, nil, nil, nil, nil, llmTest, nil, nil)
+	if err != nil {
+		t.Fatalf("buildReportPDF returned error: %v", err)
+	}
+	if string(pdfBytes[:4]) != "%PDF" {
+		t.Errorf("expected PDF header, got: %q", string(pdfBytes[:4]))
+	}
+}
+
 func TestBuildReportPDF_WithTodos(t *testing.T) {
 	todos := []TodoItem{
 		{

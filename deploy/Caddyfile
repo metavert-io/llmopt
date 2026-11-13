@@ -11,19 +11,38 @@
 #   Everything else → LLM Optimizer backend (:8090)
 #   Note: /api/config is llmopt's own endpoint (not LastSaaS).
 #   LastSaaS config is under /api/admin/config/* (covered by "admin" match).
+#
+# Cold starts: Fly stops this machine when idle and starts it on the next
+# request, which can arrive before the backends are listening. lb_try_duration
+# makes Caddy keep retrying the connection for a while instead of answering 502
+# at once. Only connection failures are retried (nothing reached the backend);
+# requests that did reach a backend are not. Caddy 2.6 can only replay a POST
+# body it has buffered, so the llmopt route sets buffer_requests (its request
+# bodies are small JSON). LastSaaS may take uploads, so it isn't buffered and
+# its retries cover GETs.
 
 :8080 {
 	# LastSaaS API routes — use path_regexp to match both /api/X and /api/X/*
 	@lastsaas path_regexp ^/api/(auth|users|tenants|tenant|billing|plans|messages|admin|branding|bundles|stripe|webhooks|bootstrap|credit-bundles|announcements|usage|docs|telemetry)(/.*)?$
 	handle @lastsaas {
-		reverse_proxy localhost:8091
+		reverse_proxy localhost:8091 {
+			lb_try_duration 45s
+			lb_try_interval 250ms
+		}
 	}
 	handle /health {
-		reverse_proxy localhost:8091
+		reverse_proxy localhost:8091 {
+			lb_try_duration 45s
+			lb_try_interval 250ms
+		}
 	}
 
 	# Everything else goes to llmopt backend
 	handle {
-		reverse_proxy localhost:8090
+		reverse_proxy localhost:8090 {
+			lb_try_duration 45s
+			lb_try_interval 250ms
+			buffer_requests
+		}
 	}
 }

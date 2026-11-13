@@ -89,7 +89,7 @@ func (p *AnthropicProvider) Call(ctx context.Context, apiKey, model, prompt stri
 		return "", fmt.Errorf("request failed: %w", readErr)
 	}
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Claude API error (%d): %s", resp.StatusCode, string(respBody))
+		return "", &ProviderHTTPError{Provider: "Claude", Status: resp.StatusCode, Body: string(respBody)}
 	}
 
 	var result struct {
@@ -247,8 +247,12 @@ func (p *AnthropicProvider) VerifyKey(ctx context.Context, apiKey string) (strin
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	model, status := verifyModelFor(ctx, p, apiKey)
+	if status != "" {
+		return status, nil
+	}
 	body, _ := json.Marshal(map[string]any{
-		"model":      "claude-haiku-4-5-20251001",
+		"model":      model,
 		"max_tokens": 10,
 		"messages": []map[string]any{
 			{"role": "user", "content": "Reply with just the word 'ok'."},
@@ -283,6 +287,13 @@ func (p *AnthropicProvider) VerifyKey(ctx context.Context, apiKey string) (strin
 		return "active", nil
 	case resp.StatusCode == 529:
 		return "active", nil
+	case resp.StatusCode == 400:
+		// A low credit balance comes back as a 400 invalid_request_error.
+		errBody, _ := io.ReadAll(resp.Body)
+		if isBillingMessage(strings.ToLower(string(errBody))) {
+			return "no_credits", nil
+		}
+		return "error", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(errBody))
 	default:
 		errBody, _ := io.ReadAll(resp.Body)
 		return "error", fmt.Errorf("unexpected status %d: %s", resp.StatusCode, string(errBody))

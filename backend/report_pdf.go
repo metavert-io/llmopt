@@ -819,6 +819,19 @@ func buildReportPDF(
 			pdf.CellFormat(25, 5, fmt.Sprintf("%d%%", ps.AccuracyRate), "", 0, "C", false, 0, "")
 			pdf.CellFormat(0, 5, fmt.Sprintf("%d/100", ps.SentimentScore), "", 1, "C", false, 0, "")
 		}
+		if len(llmTest.UnavailableProviders) > 0 {
+			// Say which selected providers couldn't answer, so a missing row
+			// isn't read as the provider ignoring the brand.
+			var notes []string
+			for _, u := range llmTest.UnavailableProviders {
+				notes = append(notes, fmt.Sprintf("%s (%s)", u.ProviderName, u.Reason))
+			}
+			pdf.Ln(2)
+			pdfCheckPageBreak(pdf, 10)
+			pdf.SetFont("Helvetica", "I", 8)
+			pdf.SetTextColor(140, 110, 40)
+			pdf.MultiCell(0, 4, "Not included: "+strings.Join(notes, "; ")+". Scores cover the providers that answered.", "", "L", false)
+		}
 		pdf.Ln(4)
 
 		// Query-level results (top 15)

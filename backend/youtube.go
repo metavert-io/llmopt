@@ -290,9 +290,29 @@ func youtubeChannelVideos(apiKey, channelID string, maxResults int) ([]YouTubeVi
 var errNoCaptions = fmt.Errorf("no captions available")
 var errBlocked = fmt.Errorf("blocked by YouTube")
 
+var warpState struct {
+	sync.Mutex
+	client    *http.Client
+	checkedAt time.Time
+}
+
+// warpRecheckInterval is how long a failed WARP check is remembered. WARP
+// connects in the background at startup, so an early miss must not stick.
+const warpRecheckInterval = 30 * time.Second
+
 // warpClient returns an *http.Client that routes through the Cloudflare WARP SOCKS5 proxy
-// at 127.0.0.1:40000 (set up in start.sh on Fly.io). Returns nil if WARP is unavailable.
-var warpClient = sync.OnceValue(func() *http.Client {
+// at 127.0.0.1:40000 (set up in start-saas.sh on Fly.io). Returns nil if WARP is unavailable.
+func warpClient() *http.Client {
+	warpState.Lock()
+	defer warpState.Unlock()
+	if warpState.client != nil {
+		return warpState.client
+	}
+	if !warpState.checkedAt.IsZero() && time.Since(warpState.checkedAt) < warpRecheckInterval {
+		return nil
+	}
+	warpState.checkedAt = time.Now()
+
 	const warpAddr = "127.0.0.1:40000"
 	// Quick connectivity check
 	conn, err := net.DialTimeout("tcp", warpAddr, 2*time.Second)
@@ -308,7 +328,7 @@ var warpClient = sync.OnceValue(func() *http.Client {
 		return nil
 	}
 	log.Printf("WARP proxy available at %s", warpAddr)
-	return &http.Client{
+	warpState.client = &http.Client{
 		Timeout: 30 * time.Second,
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -316,7 +336,8 @@ var warpClient = sync.OnceValue(func() *http.Client {
 			},
 		},
 	}
-})
+	return warpState.client
+}
 
 // preferredTranscriptMethod stores the name of the last method that successfully
 // fetched a transcript. fetchTranscript reorders its method list to try this one
