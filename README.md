@@ -180,6 +180,21 @@ SaaS mode requires [LastSaaS](https://github.com/metavert-io/lastsaas) as a depe
    ```
    See [deploy.md](deploy.md) for the full deployment guide.
 
+### Local Copy of a Hosted Account
+
+Some features work better from your own machine than from a hosted server. YouTube, for one, often blocks transcript requests from datacenter addresses but allows them from a home connection. Local account mode runs the app on your machine against the hosted service's database, as one account, with no LastSaaS and no sign-in. You see the same domains, reports and saved API keys, and whatever you create there shows up on the hosted service.
+
+```bash
+LLMOPT_LOCAL_USER_ID=<user _id>  LLMOPT_LOCAL_TENANT_ID=<tenant _id> \
+MONGODB_URI=... LLMOPT_ENCRYPTION_KEY=... ANTHROPIC_API_KEY=... YOUTUBE_API_KEY=... \
+STATIC_DIR=../frontend/dist PORT=4281 ./llmopt
+```
+
+- Use the hosted service's `MONGODB_URI` and `LLMOPT_ENCRYPTION_KEY`. The key is needed to read the account's saved provider keys.
+- The user must be a member of the tenant (`tenant_memberships`). The server checks this at startup and on every request.
+- Every request acts as that account, so the server listens on `127.0.0.1` and refuses any non-loopback `LLMOPT_LISTEN_HOST`. To reach it from your other devices, put a private tunnel in front of it, such as `tailscale serve`. Never expose it on your network.
+- The hosted service owns the database. A local copy runs no migrations and none of the background jobs (cleanup, provider health checks, screenshots).
+
 ### Build Verification
 
 ```bash
@@ -198,6 +213,8 @@ cd ../frontend && npx tsc --noEmit
 | `LLMOPT_SAAS_ENABLED` | SaaS only | Enable multi-tenant SaaS mode |
 | `LLMOPT_ENCRYPTION_KEY` | SaaS only | AES key for encrypting tenant API keys |
 | `LLMOPT_JWT_ACCESS_SECRET` | SaaS only | HMAC secret for JWT signing |
+| `LLMOPT_LOCAL_USER_ID`, `LLMOPT_LOCAL_TENANT_ID` | Local account mode | Act as this account of a hosted database without signing in (see above) |
+| `LLMOPT_LISTEN_HOST` | No | Address to listen on (default: all interfaces; `127.0.0.1` and loopback only in local account mode) |
 | `MCP_JWT_SECRET` | No | MCP OAuth token signing key (derived from encryption key if not set) |
 | `BASE_URL` | No | Public URL for OAuth metadata (default: `https://llmopt.metavert.io`) |
 | `YOUTUBE_API_KEY` | No | YouTube Data API key for video analysis |
