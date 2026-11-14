@@ -115,9 +115,17 @@ func resolveAnthropicKey(ctx context.Context, mongoDB *MongoDB, encKey []byte, f
 	return resolveProviderKey(ctx, mongoDB, encKey, fallbackKey, saasEnabled, "anthropic")
 }
 
+// localYouTubeKey is set in local account mode when the copy has its own
+// YOUTUBE_API_KEY: YouTube calls use it instead of the account's saved key, so
+// the copy's owner decides which key's quota a local run spends.
+var localYouTubeKey string
+
 // resolveYouTubeKey resolves the YouTube Data API v3 key for the current tenant.
 // In non-SaaS mode, falls back to the system YOUTUBE_API_KEY env var.
 func resolveYouTubeKey(ctx context.Context, mongoDB *MongoDB, encKey []byte, systemKey string, saasEnabled bool) (string, error) {
+	if localYouTubeKey != "" {
+		return localYouTubeKey, nil
+	}
 	if !saasEnabled {
 		if systemKey != "" {
 			return systemKey, nil

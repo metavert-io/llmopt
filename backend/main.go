@@ -161,6 +161,10 @@ func main() {
 				tenantName = info.Tenant.Name
 			}
 			log.Printf("Local account mode: every request acts as %s in %q; no migrations or background jobs", info.Email, tenantName)
+			if ytKey != "" {
+				localYouTubeKey = ytKey
+				log.Println("Local account mode: YouTube calls use this copy's YOUTUBE_API_KEY, not the account's saved YouTube key")
+			}
 		} else {
 			log.Println("SaaS mode enabled — JWT auth active")
 
@@ -1544,7 +1548,8 @@ func handleProviderHealthCheck(mongoDB *MongoDB, encKey []byte) http.HandlerFunc
 		for i, key := range keys {
 			if key.Provider == "youtube" {
 				ytStatus := "error"
-				if key.Status == "active" {
+				if key.Status == "active" || localYouTubeKey != "" {
+					// A local copy with its own key doesn't use the saved one.
 					ytStatus = "available"
 				}
 				results[i] = providerResult{
