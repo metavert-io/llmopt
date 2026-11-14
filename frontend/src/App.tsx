@@ -622,6 +622,26 @@ interface FailedAnalysis {
 }
 
 // LLM Test types
+// splitList splits a comma-separated form field into items, keeping commas
+// inside brackets: "Starter Kit (monthly plan, 50 seats), Coaching" gives two items.
+function splitList(s: string): string[] {
+  const items: string[] = []
+  let depth = 0
+  let cur = ''
+  for (const ch of s) {
+    if (ch === '(' || ch === '[') depth++
+    else if ((ch === ')' || ch === ']') && depth > 0) depth--
+    if (ch === ',' && depth === 0) {
+      items.push(cur)
+      cur = ''
+    } else {
+      cur += ch
+    }
+  }
+  items.push(cur)
+  return items.map(x => x.trim()).filter(Boolean)
+}
+
 interface TestQuery {
   query: string
   type: string   // brand, category, comparison, discovery, custom
@@ -1452,25 +1472,24 @@ export default function App() {
     if (!brandDomain.trim()) return
     setBrandSaving(true)
     try {
-      const splitTrim = (s: string) => s.split(',').map(x => x.trim()).filter(Boolean)
       const body: Partial<BrandProfile> = {
         brand_name: brandForm.brand_name,
         description: brandForm.description,
-        categories: splitTrim(brandForm.categories),
-        products: splitTrim(brandForm.products),
+        categories: splitList(brandForm.categories),
+        products: splitList(brandForm.products),
         primary_audience: brandForm.primary_audience,
-        key_use_cases: splitTrim(brandForm.key_use_cases),
+        key_use_cases: splitList(brandForm.key_use_cases),
         competitors: brandCompetitors,
         target_queries: brandQueries,
         key_messages: brandMessages,
-        differentiators: splitTrim(brandForm.differentiators),
+        differentiators: splitList(brandForm.differentiators),
         presence: {
           youtube_url: brandPresenceForm.youtube_url,
-          subreddits: splitTrim(brandPresenceForm.subreddits),
-          review_site_urls: splitTrim(brandPresenceForm.review_site_urls),
-          social_profiles: splitTrim(brandPresenceForm.social_profiles),
-          content_assets: splitTrim(brandPresenceForm.content_assets),
-          podcasts: splitTrim(brandPresenceForm.podcasts),
+          subreddits: splitList(brandPresenceForm.subreddits),
+          review_site_urls: splitList(brandPresenceForm.review_site_urls),
+          social_profiles: splitList(brandPresenceForm.social_profiles),
+          content_assets: splitList(brandPresenceForm.content_assets),
+          podcasts: splitList(brandPresenceForm.podcasts),
         },
         presence_complete: brandPresenceComplete,
       }
@@ -3156,7 +3175,7 @@ export default function App() {
   const addSelectedDifferentiators = useCallback(() => {
     const newDiffs = suggestedDiffs
       .filter((_: string, i: number) => suggestDiffSelected.has(i))
-    const currentDiffs = brandForm.differentiators ? brandForm.differentiators.split(',').map(s => s.trim()).filter(Boolean) : []
+    const currentDiffs = splitList(brandForm.differentiators || '')
     const existingLower = new Set(currentDiffs.map(d => d.toLowerCase()))
     const merged = [...currentDiffs, ...newDiffs.filter(d => !existingLower.has(d.toLowerCase()))]
     setBrandForm(prev => ({ ...prev, differentiators: merged.join(', ') }))
@@ -3218,7 +3237,7 @@ export default function App() {
             ).filter(Boolean)
             if (diffs.length) {
               setBrandForm(prev => {
-                const current = prev.differentiators ? prev.differentiators.split(',').map(s => s.trim()).filter(Boolean) : []
+                const current = splitList(prev.differentiators || '')
                 const existLower = new Set(current.map(d => d.toLowerCase()))
                 const merged = [...current, ...diffs.filter(d => !existLower.has(d.toLowerCase()))]
                 return { ...prev, differentiators: merged.join(', ') }

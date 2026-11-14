@@ -39,6 +39,65 @@ func (e *ProviderHTTPError) Error() string {
 	return fmt.Sprintf("%s API error (%d): %s", e.Provider, e.Status, e.Body)
 }
 
+// QuotaError is a provider's 429 that names a quota. Gemini's quotas are per
+// model (the free tier allows no requests at all to some models), so when a
+// model's quota is gone (PerModel) the run moves to the provider's next model;
+// a per-minute limit is retried after RetryAfter.
+type QuotaError struct {
+	Provider   string
+	Message    string
+	PerModel   bool
+	RetryAfter time.Duration
+}
+
+func (e *QuotaError) Error() string {
+	if e.Message == "" {
+		return e.Provider + " quota exceeded"
+	}
+	return fmt.Sprintf("%s quota exceeded: %s", e.Provider, e.Message)
+}
+
+// Unwrap makes a per-minute limit an ErrOverloaded, which callers retry.
+func (e *QuotaError) Unwrap() error {
+	if e.PerModel {
+		return nil
+	}
+	return ErrOverloaded
+}
+
+var (
+	geminiRetryDelayRe = regexp.MustCompile(`"retryDelay":\s*"(\d+(?:\.\d+)?)s"`)
+	quotaLimitZeroRe   = regexp.MustCompile(`limit: 0\b`)
+)
+
+// geminiQuotaError reads a Gemini 429 body.
+func geminiQuotaError(body []byte) *QuotaError {
+	var parsed struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	msg := strings.TrimSpace(string(body))
+	if json.Unmarshal(body, &parsed) == nil && parsed.Error.Message != "" {
+		msg = parsed.Error.Message
+	}
+	lower := strings.ToLower(string(body))
+	qe := &QuotaError{
+		Provider: "Gemini",
+		Message:  truncateStr(strings.Join(strings.Fields(msg), " "), 300),
+		PerModel: quotaLimitZeroRe.MatchString(lower) || strings.Contains(lower, "perday"),
+	}
+	if m := geminiRetryDelayRe.FindStringSubmatch(string(body)); m != nil {
+		if secs, err := strconv.ParseFloat(m[1], 64); err == nil {
+			qe.RetryAfter = time.Duration(secs * float64(time.Second))
+		}
+	}
+	return qe
+}
+
+// maxQuotaRetryWait caps how long one retry waits for a provider's retry hint.
+const maxQuotaRetryWait = 60 * time.Second
+
 // providerFailure says what a failed provider call means for the rest of a run.
 type providerFailure int
 
@@ -85,6 +144,13 @@ func classifyProviderError(err error) providerFailure {
 	if err == nil {
 		return failOther
 	}
+	var qe *QuotaError
+	if errors.As(err, &qe) {
+		if qe.PerModel {
+			return failModel
+		}
+		return failRetry
+	}
 	if errors.Is(err, ErrOverloaded) {
 		return failRetry
 	}
@@ -123,8 +189,16 @@ func providerFailureReason(err error) string {
 		}
 		return "the API key was rejected (invalid, revoked or without access)"
 	case failModel:
+		var qe *QuotaError
+		if errors.As(err, &qe) {
+			return "this API key has no quota left for the models tried (" + qe.Message + ")"
+		}
 		return "none of its models could be used with this API key"
 	case failRetry:
+		var qe *QuotaError
+		if errors.As(err, &qe) {
+			return "its API stayed rate-limited (" + qe.Message + ")"
+		}
 		return "its API stayed rate-limited or overloaded"
 	}
 	if err == nil {
@@ -144,10 +218,18 @@ func callWithRetry(ctx context.Context, p LLMProvider, apiKey, model, prompt str
 		if err == nil || classifyProviderError(err) != failRetry || attempt >= len(providerRetryDelays) {
 			return resp, err
 		}
+		wait := providerRetryDelays[attempt]
+		var qe *QuotaError
+		if errors.As(err, &qe) && qe.RetryAfter > wait {
+			wait = qe.RetryAfter
+			if wait > maxQuotaRetryWait {
+				wait = maxQuotaRetryWait
+			}
+		}
 		select {
 		case <-ctx.Done():
 			return "", err
-		case <-time.After(providerRetryDelays[attempt]):
+		case <-time.After(wait):
 		}
 	}
 }
@@ -242,11 +324,30 @@ func findModel(models []ModelDef, id string) (ModelDef, bool) {
 // test stands in for someone asking there. For OpenAI that is the chat-latest
 // alias, which OpenAI points at the model ChatGPT's Chat tab answers with; the
 // frontier models at the top of the API list (GPT-6.1 Terra, for one) aren't
-// served there. Other providers use their best model. note says why, for the
-// model picker.
+// served there. The Gemini app answers with a Flash model, so Gemini uses the
+// newest stable Flash (Pro models also often have no free-tier quota). Other
+// providers use their best model. note says why, for the model picker.
 func testDefaultModel(providerID string, models []ModelDef) (id, note string) {
 	if len(models) == 0 {
 		return "", ""
+	}
+	if providerID == "gemini" {
+		var preview string
+		for _, m := range models { // ranked newest first
+			lid := strings.ToLower(m.ID)
+			if !strings.Contains(lid, "flash") || strings.Contains(lid, "lite") {
+				continue
+			}
+			if !strings.Contains(lid, "preview") {
+				return m.ID, "closest to the Gemini app"
+			}
+			if preview == "" {
+				preview = m.ID
+			}
+		}
+		if preview != "" {
+			return preview, "closest to the Gemini app"
+		}
 	}
 	if providerID == "openai" {
 		if _, ok := findModel(models, openaiChatGPTAlias); ok {

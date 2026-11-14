@@ -3910,6 +3910,7 @@ func handleSaveBrand(mongoDB *MongoDB) http.HandlerFunc {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
 			return
 		}
+		repairBrandLists(&req)
 
 		ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 		defer cancel()
@@ -8094,6 +8095,7 @@ func handleGenerateTestQueries(mongoDB *MongoDB) http.HandlerFunc {
 			})
 			return
 		}
+		repairBrandLists(&brand) // profiles saved before the fix may hold split items
 
 		var queries []LLMTestQuery
 

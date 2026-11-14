@@ -98,11 +98,14 @@ func (p *GeminiProvider) Call(ctx context.Context, apiKey, model, prompt string,
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 || resp.StatusCode == 529 || resp.StatusCode == 503 {
+	if resp.StatusCode == 529 || resp.StatusCode == 503 {
 		return "", ErrOverloaded
 	}
 
 	respBody, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode == 429 {
+		return "", geminiQuotaError(respBody)
+	}
 	if resp.StatusCode != 200 {
 		return "", &ProviderHTTPError{Provider: "Gemini", Status: resp.StatusCode, Body: string(respBody)}
 	}
@@ -288,9 +291,13 @@ func (p *GeminiProvider) VerifyKey(ctx context.Context, apiKey string) (string, 
 	case resp.StatusCode == 403:
 		return "invalid", nil
 	case resp.StatusCode == 429:
+		// Gemini's quotas are per model and per minute, so a quota 429 means the
+		// key works; whether a test's models have quota is handled when it runs.
+		// Only a message about prepaid credits or the billing account means the
+		// key can't be used.
 		errBody, _ := io.ReadAll(resp.Body)
 		errStr := strings.ToLower(string(errBody))
-		if strings.Contains(errStr, "quota") || strings.Contains(errStr, "billing") {
+		if containsAny(errStr, "credits are depleted", "prepay", "billing account", "billing is not enabled", "billing_disabled") {
 			return "no_credits", nil
 		}
 		return "active", nil
