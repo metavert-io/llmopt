@@ -542,6 +542,16 @@ func TestTestDefaultModel_Fallbacks(t *testing.T) {
 	if id, note := testDefaultModel("anthropic", []ModelDef{{ID: "claude-opus-5-5"}, {ID: "claude-sonnet-5-5"}}); id != "claude-opus-5-5" || note != "best available" {
 		t.Errorf("anthropic = %q (%q)", id, note)
 	}
+	gemini := []ModelDef{{ID: "gemini-3.6-pro-preview"}, {ID: "gemini-3.6-flash-preview"}, {ID: "gemini-3.5-pro"}, {ID: "gemini-3.5-flash"}, {ID: "gemini-3.5-flash-lite"}}
+	if id, note := testDefaultModel("gemini", gemini); id != "gemini-3.5-flash" || note != "closest to the Gemini app" {
+		t.Errorf("gemini = %q (%q)", id, note)
+	}
+	if id, _ := testDefaultModel("gemini", gemini[:2]); id != "gemini-3.6-flash-preview" {
+		t.Errorf("gemini with only previews = %q", id)
+	}
+	if id, _ := testDefaultModel("gemini", []ModelDef{{ID: "gemini-3.5-pro"}}); id != "gemini-3.5-pro" {
+		t.Errorf("gemini with no flash = %q", id)
+	}
 	if id, _ := testDefaultModel("grok", nil); id != "" {
 		t.Errorf("empty list = %q", id)
 	}

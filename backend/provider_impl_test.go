@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -355,7 +356,7 @@ func TestGeminiCall_Overloaded(t *testing.T) {
 
 			p := &GeminiProvider{}
 			_, err := p.Call(context.Background(), "key", "model", "prompt", 100)
-			if err != ErrOverloaded {
+			if !errors.Is(err, ErrOverloaded) {
 				t.Errorf("expected ErrOverloaded for %d, got %v", status, err)
 			}
 		})
@@ -485,18 +486,24 @@ func TestGeminiVerifyKey_Invalid(t *testing.T) {
 	}
 }
 
-func TestGeminiVerifyKey_NoCredits(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(429)
-		w.Write([]byte(`{"error":{"message":"quota exceeded"}}`))
-	}))
-	defer server.Close()
-	withAllProviderBases(t, server)
-
-	p := &GeminiProvider{}
-	status, _ := p.VerifyKey(context.Background(), "key")
-	if status != "no_credits" {
-		t.Errorf("expected 'no_credits', got %q", status)
+// A quota 429 means the key works (Gemini's quotas are per model and per
+// minute); only depleted prepaid credits or billing mean it can't be used.
+func TestGeminiVerifyKey_Quota429(t *testing.T) {
+	cases := map[string]string{
+		`{"error":{"message":"quota exceeded"}}`: "active",
+		`{"error":{"message":"Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing."}}`: "no_credits",
+	}
+	for body, want := range cases {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(429)
+			w.Write([]byte(body))
+		}))
+		withAllProviderBases(t, server)
+		status, _ := (&GeminiProvider{}).VerifyKey(context.Background(), "key-"+want)
+		if status != want {
+			t.Errorf("%s: got %q, want %q", body, status, want)
+		}
+		server.Close()
 	}
 }
 
