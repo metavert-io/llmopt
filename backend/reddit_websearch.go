@@ -76,12 +76,20 @@ func redditTimeHint(timeFilter string) string {
 	return ""
 }
 
-func redditWebSearchPrompt(topics []string, timeFilter string) string {
+func redditWebSearchPrompt(topics, subreddits []string, timeFilter string) string {
 	quoted := make([]string, len(topics))
 	for i, t := range topics {
 		quoted[i] = fmt.Sprintf("%q", t)
 	}
-	return fmt.Sprintf(`Find Reddit threads where people discuss each of these topics: %s. Search Reddit separately for each topic.%s
+	where := ""
+	if len(subreddits) > 0 {
+		subs := make([]string, len(subreddits))
+		for i, s := range subreddits {
+			subs[i] = "r/" + s
+		}
+		where = " Look in particular in " + strings.Join(subs, ", ") + ", and anywhere else on Reddit."
+	}
+	return fmt.Sprintf(`Find Reddit threads where people discuss each of these topics: %s. Search Reddit separately for each topic.%s%s
 
 Then reply with ONLY a JSON array (no prose, no code fences) of the distinct threads you found, at most 20, each:
 {"url": the thread's reddit.com/r/<subreddit>/comments/<id>/... URL exactly as in your search results,
@@ -90,7 +98,7 @@ Then reply with ONLY a JSON array (no prose, no code fences) of the distinct thr
  "summary": 1-3 sentences on what the post asks or says and what the replies conclude,
  "comment_excerpts": up to 4 short quotes from replies exactly as they appear in the results (empty if none are visible),
  "mentions": brand, product or service names discussed in the thread}
-Only include threads that appeared in your search results. If you found none, reply [].`, strings.Join(quoted, ", "), redditTimeHint(timeFilter))
+Only include threads that appeared in your search results. If you found none, reply [].`, strings.Join(quoted, ", "), where, redditTimeHint(timeFilter))
 }
 
 type webSearchThread struct {
@@ -104,7 +112,7 @@ type webSearchThread struct {
 
 // openaiRedditSearch runs one OpenAI web search request for some topics and
 // returns the threads it found that are among its search sources.
-func openaiRedditSearch(ctx context.Context, apiKey, model string, topics []string, timeFilter string) ([]RedditThread, error) {
+func openaiRedditSearch(ctx context.Context, apiKey, model string, topics, subreddits []string, timeFilter string) ([]RedditThread, error) {
 	body, _ := json.Marshal(map[string]any{
 		"model":             model,
 		"max_output_tokens": openaiOutputBudget(model, 8000),
@@ -113,7 +121,7 @@ func openaiRedditSearch(ctx context.Context, apiKey, model string, topics []stri
 			"filters": map[string]any{"allowed_domains": []string{"reddit.com"}},
 		}},
 		"include": []string{"web_search_call.action.sources"},
-		"input":   []map[string]any{{"role": "user", "content": redditWebSearchPrompt(topics, timeFilter)}},
+		"input":   []map[string]any{{"role": "user", "content": redditWebSearchPrompt(topics, subreddits, timeFilter)}},
 	})
 	req, err := http.NewRequestWithContext(ctx, "POST", openaiAPIBase+"/v1/responses", bytes.NewReader(body))
 	if err != nil {
@@ -211,9 +219,10 @@ func openaiRedditSearch(ctx context.Context, apiKey, model string, topics []stri
 }
 
 // redditDiscoverViaWebSearch searches the topics in batches, a few requests at a
-// time, and returns the distinct threads found. It fails only when every
-// request does.
-func redditDiscoverViaWebSearch(ctx context.Context, apiKey, model string, topics []string, timeFilter string, statusFn func(string)) ([]RedditThread, error) {
+// time, and returns the distinct threads found. Subreddits the user chose are a
+// hint (Reddit's own search also always covers all of Reddit). It fails only
+// when every request does.
+func redditDiscoverViaWebSearch(ctx context.Context, apiKey, model string, topics, subreddits []string, timeFilter string, statusFn func(string)) ([]RedditThread, error) {
 	var batches [][]string
 	for i := 0; i < len(topics); i += redditWebSearchBatch {
 		end := i + redditWebSearchBatch
@@ -239,7 +248,7 @@ func redditDiscoverViaWebSearch(ctx context.Context, apiKey, model string, topic
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			got, err := openaiRedditSearch(ctx, apiKey, model, b, timeFilter)
+			got, err := openaiRedditSearch(ctx, apiKey, model, b, subreddits, timeFilter)
 			mu.Lock()
 			defer mu.Unlock()
 			done++

@@ -994,6 +994,11 @@ export default function App() {
   const testQueriesDomainRef = useRef<string | null>(null)
   const testQueriesSyncedRef = useRef('')
   const testQuerySaveRef = useRef<{ timer: ReturnType<typeof setTimeout>; domain: string; body: string } | null>(null)
+  const testQueriesRef = useRef<TestQuery[]>([]) // the list as rendered, for async callbacks
+  // A save that hasn't reached the server yet (it retries), and a domain whose
+  // saved list couldn't be loaded (nothing is saved for it until it loads).
+  const [testQuerySaveFailed, setTestQuerySaveFailed] = useState(false)
+  const [testQueriesLoadFailed, setTestQueriesLoadFailed] = useState<string | null>(null)
   const selectedDomainRef = useRef('')
   const [testSelectedProviders, setTestSelectedProviders] = useState<string[]>([])
   const [testAvailableProviders, setTestAvailableProviders] = useState<{ provider: string; status: string; preferred_model?: string }[]>([])
@@ -2873,23 +2878,78 @@ export default function App() {
   }, [activeTab, selectedDomain, fetchSearchAnalysisList, loadSearchAnalysis])
 
   selectedDomainRef.current = selectedDomain
+  testQueriesRef.current = testQueries
 
-  const sendTestQuerySave = (domain: string, body: string, keepalive = false) => {
+  const sendTestQuerySave = (domain: string, body: string, keepalive = false): Promise<boolean> =>
     apiFetch(`/api/test/${encodeURIComponent(domain)}/queries`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body,
       keepalive,
-    }).catch(() => {})
+    }).then(r => r.ok).catch(() => false)
+
+  // Saves one version of a domain's list. An edit counts as saved only once the
+  // server confirms it: a failed save stays pending, is retried with backoff,
+  // and is sent again if the page is hidden or left. A newer edit takes over.
+  const attemptTestQuerySave = (domain: string, body: string, keepalive: boolean, tries: number) => {
+    sendTestQuerySave(domain, body, keepalive).then(ok => {
+      const pending = testQuerySaveRef.current
+      if (pending && pending.domain === domain && pending.body !== body) return // superseded
+      const mine = !!pending && pending.domain === domain && pending.body === body
+      if (ok) {
+        if (mine) testQuerySaveRef.current = null
+        if (testQueriesDomainRef.current === domain) {
+          testQueriesSyncedRef.current = body
+          setTestQuerySaveFailed(false)
+        }
+        return
+      }
+      if (testQueriesDomainRef.current === domain) setTestQuerySaveFailed(true)
+      if (tries >= 6) return // stays pending; leaving the page sends it once more
+      const timer = setTimeout(() => attemptTestQuerySave(domain, body, false, tries + 1), Math.min(30000, 2000 * 2 ** tries))
+      if (mine || !pending) testQuerySaveRef.current = { timer, domain, body }
+    })
   }
   // Sends a pending save now (leaving the page or switching domain).
   const flushTestQuerySave = () => {
     const pending = testQuerySaveRef.current
     if (!pending) return
     clearTimeout(pending.timer)
-    testQuerySaveRef.current = null
-    testQueriesSyncedRef.current = pending.body
-    sendTestQuerySave(pending.domain, pending.body, true)
+    attemptTestQuerySave(pending.domain, pending.body, true, 0)
+  }
+
+  // Loads a domain's saved queries (or its last test's), suggesting some only
+  // when it has never had any. A failed load is retried; if it keeps failing
+  // the page says so and nothing is saved for the domain, so an empty or
+  // partial list can't replace the real one. Queries typed while it loads are
+  // kept, added after the saved ones.
+  const loadSavedTestQueries = (domain: string, attempt = 0) => {
+    setTestQueriesLoadFailed(null)
+    apiFetch(`/api/test/${encodeURIComponent(domain)}/queries`).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))).then(async saved => {
+      let qs: TestQuery[] = Array.isArray(saved?.queries) ? saved.queries : []
+      if (qs.length === 0 && saved?.source === 'none') {
+        const r = await apiFetch('/api/test/generate-queries', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ domain }),
+        })
+        const qData = r.ok ? await r.json() : null
+        if (Array.isArray(qData?.queries)) qs = qData.queries
+      }
+      // Skip if the domain changed, or Re-run already filled the list.
+      if (selectedDomainRef.current !== domain || testQueriesDomainRef.current === domain) return
+      testQueriesSyncedRef.current = JSON.stringify({ queries: qs })
+      testQueriesDomainRef.current = domain
+      const typed = testQueriesRef.current.filter(q => q.query.trim() && !qs.some(s => s.query === q.query))
+      setTestQueries(typed.length ? [...qs, ...typed] : qs)
+    }).catch(() => {
+      if (selectedDomainRef.current !== domain || testQueriesDomainRef.current === domain) return
+      if (attempt < 3) {
+        setTimeout(() => loadSavedTestQueries(domain, attempt + 1), 2000 * (attempt + 1)) // e.g. a cold start
+      } else {
+        setTestQueriesLoadFailed(domain)
+      }
+    })
   }
 
   // Re-running starts from exactly the queries of the results on screen; that
@@ -2898,6 +2958,7 @@ export default function App() {
     const shown = testResults?.queries
     if (selectedDomain && Array.isArray(shown) && shown.length > 0) {
       testQueriesDomainRef.current = selectedDomain // a saved-list load still in flight won't replace it
+      setTestQueriesLoadFailed(null)
       setTestQueries(shown.map(q => ({ query: q.query, type: q.type, priority: q.priority })))
     }
     setTestView('input')
@@ -2910,20 +2971,18 @@ export default function App() {
     if (sharedModeRef.current || !domain || domain !== selectedDomain) return
     const body = JSON.stringify({ queries: testQueries })
     const pending = testQuerySaveRef.current
+    let replacing = false // a different version is pending or on its way: save this one even if it matches the last saved
     if (pending) {
       if (pending.domain !== domain) {
         flushTestQuerySave()
       } else {
         clearTimeout(pending.timer)
         testQuerySaveRef.current = null
+        replacing = pending.body !== body
       }
     }
-    if (body === testQueriesSyncedRef.current) return
-    const timer = setTimeout(() => {
-      if (testQuerySaveRef.current?.timer === timer) testQuerySaveRef.current = null
-      testQueriesSyncedRef.current = body
-      sendTestQuerySave(domain, body)
-    }, 800)
+    if (!replacing && body === testQueriesSyncedRef.current) return
+    const timer = setTimeout(() => attemptTestQuerySave(domain, body, false, 0), 800)
     testQuerySaveRef.current = { timer, domain, body }
   }, [testQueries, selectedDomain])
 
@@ -2945,27 +3004,12 @@ export default function App() {
       // Load this domain's saved queries (or its last test's); suggest some
       // only when it has never had any.
       if (testQueriesDomainRef.current !== selectedDomain) {
-        const domain = selectedDomain
         flushTestQuerySave()
         testQueriesDomainRef.current = null
+        testQueriesRef.current = []
         setTestQueries([])
-        apiFetch(`/api/test/${encodeURIComponent(domain)}/queries`).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))).then(async saved => {
-          let qs: TestQuery[] = Array.isArray(saved?.queries) ? saved.queries : []
-          if (qs.length === 0 && saved?.source === 'none') {
-            const r = await apiFetch('/api/test/generate-queries', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ domain }),
-            })
-            const qData = r.ok ? await r.json() : null
-            if (Array.isArray(qData?.queries)) qs = qData.queries
-          }
-          // Skip if the domain changed, or Re-run already filled the list.
-          if (selectedDomainRef.current !== domain || testQueriesDomainRef.current === domain) return
-          testQueriesSyncedRef.current = JSON.stringify({ queries: qs })
-          testQueriesDomainRef.current = domain
-          setTestQueries(qs)
-        }).catch(() => {})
+        setTestQuerySaveFailed(false)
+        loadSavedTestQueries(selectedDomain)
       }
       // Fetch available providers
       apiFetch('/api/settings/api-keys').then(r => r.ok ? r.json() : null).then(data => {
@@ -9315,7 +9359,7 @@ curl -X PATCH \\
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className="text-xs px-1.5 py-0.5 bg-orange-500/15 text-orange-300 border border-orange-500/20 rounded">r/{t.subreddit}</span>
                               <span className="text-dark-500 text-xs">{t.source === 'web_search' ? 'via web search' : `${t.score} pts · ${t.num_comments} comments`}</span>
-                              <span className="text-dark-600 text-xs">· {fmtDate(t.created_utc)}</span>
+                              {t.source !== 'web_search' && <span className="text-dark-600 text-xs">· {fmtDate(t.created_utc)}</span>}
                             </div>
                             <p className="text-white text-sm">{t.title}</p>
                           </div>
@@ -10532,6 +10576,15 @@ curl -X PATCH \\
                       className="text-xs px-2 py-1 bg-dark-700 text-dark-300 rounded hover:text-white transition-colors cursor-pointer"
                     >+ Add Query</button>
                   </div>
+                  {testQueriesLoadFailed === selectedDomain && (
+                    <div className="mb-3 p-2.5 bg-amber-500/10 border border-amber-500/20 rounded-lg text-amber-300 text-xs flex items-center justify-between gap-3">
+                      <span>Couldn't load this domain's saved queries, so changes here aren't saved yet.</span>
+                      <button onClick={() => loadSavedTestQueries(selectedDomain)} className="shrink-0 px-2 py-1 bg-dark-700 text-white rounded hover:bg-dark-600 cursor-pointer">Retry</button>
+                    </div>
+                  )}
+                  {testQuerySaveFailed && testQueriesLoadFailed !== selectedDomain && (
+                    <p className="mb-3 text-amber-300 text-xs">Your latest changes aren't saved yet; retrying.</p>
+                  )}
                   {testQueries.length === 0 ? (
                     <p className="text-dark-500 text-sm">No queries yet. Add queries or <button onClick={() => {
                       apiFetch('/api/test/generate-queries', {

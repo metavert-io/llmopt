@@ -96,3 +96,43 @@ func TestLocalAccountWrap(t *testing.T) {
 		t.Errorf("non-member: code %d, handler ran with tenant %q", w.Code, gotTenant)
 	}
 }
+
+// The local copy answers only its own pages: right host, no foreign Origin, not
+// cross-site, and no CORS headers.
+func TestLocalAccountGuard(t *testing.T) {
+	t.Setenv("LLMOPT_LOCAL_ORIGINS", "https://box.example.ts.net:8448, bad-entry")
+	la := &localAccount{}
+	h := la.guard(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write([]byte("ok")) }), "4281")
+	cases := []struct {
+		name, host, origin, site string
+		want                     int
+	}{
+		{"loopback page load", "127.0.0.1:4281", "", "none", 200},
+		{"localhost fetch", "localhost:4281", "http://localhost:4281", "same-origin", 200},
+		{"published address", "box.example.ts.net:8448", "https://box.example.ts.net:8448", "same-origin", 200},
+		{"curl, no browser headers", "127.0.0.1:4281", "", "", 200},
+		{"another site's fetch", "127.0.0.1:4281", "https://evil.example", "cross-site", 403},
+		{"foreign origin without fetch metadata", "127.0.0.1:4281", "https://evil.example", "", 403},
+		{"cross-site without Origin (no-cors GET)", "127.0.0.1:4281", "", "cross-site", 403},
+		{"DNS rebinding host", "evil.example:4281", "", "", 403},
+		{"same host, other port", "127.0.0.1:9999", "", "", 403},
+	}
+	for _, c := range cases {
+		req := httptest.NewRequest("POST", "/api/brands/x", nil)
+		req.Host = c.host
+		if c.origin != "" {
+			req.Header.Set("Origin", c.origin)
+		}
+		if c.site != "" {
+			req.Header.Set("Sec-Fetch-Site", c.site)
+		}
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, rec.Code, c.want)
+		}
+		if rec.Header().Get("Access-Control-Allow-Origin") != "" {
+			t.Errorf("%s: sent CORS headers", c.name)
+		}
+	}
+}

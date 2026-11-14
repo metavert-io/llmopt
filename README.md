@@ -192,7 +192,8 @@ STATIC_DIR=../frontend/dist PORT=4281 ./llmopt
 
 - Use the hosted service's `MONGODB_URI` and `LLMOPT_ENCRYPTION_KEY`. The key is needed to read the account's saved provider keys.
 - The user must be a member of the tenant (`tenant_memberships`). The server checks this at startup and on every request.
-- Every request acts as that account, so the server listens on `127.0.0.1` and refuses any non-loopback `LLMOPT_LISTEN_HOST`. To reach it from your other devices, put a private tunnel in front of it, such as `tailscale serve`. Never expose it on your network.
+- Every request acts as that account, so the server listens on `127.0.0.1` and refuses any non-loopback `LLMOPT_LISTEN_HOST`. To reach it from your other devices, put a private tunnel in front of it, such as `tailscale serve`, and list the address you open it at in `LLMOPT_LOCAL_ORIGINS` (for example `https://my-mac.example.ts.net:8448`). Never expose it on your network.
+- It answers only its own pages. It refuses requests addressed to other host names, which blocks DNS rebinding, and requests from other sites (a foreign `Origin`, or `Sec-Fetch-Site: cross-site`). It sends no CORS headers. Without these checks, any web page open in the same browser could act as the account.
 - The hosted service owns the database. A local copy runs no migrations and none of the background jobs (cleanup, provider health checks, screenshots).
 
 ### Build Verification
@@ -215,6 +216,9 @@ cd ../frontend && npx tsc --noEmit
 | `LLMOPT_JWT_ACCESS_SECRET` | SaaS only | HMAC secret for JWT signing |
 | `LLMOPT_LOCAL_USER_ID`, `LLMOPT_LOCAL_TENANT_ID` | Local account mode | Act as this account of a hosted database without signing in (see above) |
 | `LLMOPT_LISTEN_HOST` | No | Address to listen on (default: all interfaces; `127.0.0.1` and loopback only in local account mode) |
+| `LLMOPT_LOCAL_ORIGINS` | Local account mode | Comma-separated `scheme://host[:port]` addresses the local copy is opened at besides `127.0.0.1`/`localhost` |
+| `LLMOPT_IDLE_SHUTDOWN`, `LLMOPT_IDLE_SHUTDOWN_VISITOR` | No | Stop the machine after this long without signed-in work (and anonymous visits); see deploy.md |
+| `LLMOPT_LASTSAAS_PROXY`, `LLMOPT_LASTSAAS_UPSTREAM` | SaaS deploy | Listen address for, and LastSaaS URL behind, the proxy that lets idle shutdown see LastSaaS traffic |
 | `MCP_JWT_SECRET` | No | MCP OAuth token signing key (derived from encryption key if not set) |
 | `BASE_URL` | No | Public URL for OAuth metadata (default: `https://llmopt.metavert.io`) |
 | `YOUTUBE_API_KEY` | No | YouTube Data API key for video analysis |

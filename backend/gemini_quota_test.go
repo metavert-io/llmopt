@@ -92,3 +92,21 @@ func TestLLMTest_GeminiNoQuotaModelSwitches(t *testing.T) {
 		t.Errorf("no switch notice:\n%s", statusMessages(events))
 	}
 }
+
+// A Gemini 429 for depleted prepaid credits ends the key's use at once instead
+// of being retried as a per-minute limit.
+func TestGeminiCall_DepletedCreditsIsAKeyFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(429)
+		w.Write([]byte(`{"error":{"code":429,"message":"Your prepayment credits are depleted. Please go to AI Studio to manage your project and billing.","status":"RESOURCE_EXHAUSTED"}}`))
+	}))
+	defer server.Close()
+	withAllProviderBases(t, server)
+	_, err := (&GeminiProvider{}).Call(context.Background(), "k", "gemini-4-hydrogen", "q", 100)
+	if c := classifyProviderError(err); c != failKey {
+		t.Errorf("classified %v, want failKey (err %v)", c, err)
+	}
+	if r := providerFailureReason(err); !strings.Contains(r, "out of credits") {
+		t.Errorf("reason %q", r)
+	}
+}

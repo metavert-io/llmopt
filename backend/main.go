@@ -203,7 +203,10 @@ func main() {
 			return h
 		}
 		return func(w http.ResponseWriter, r *http.Request) {
-			sm.RequireJWT(sm.RequireTenant(http.HandlerFunc(h))).ServeHTTP(w, r)
+			sm.RequireJWT(sm.RequireTenant(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				markSignedIn(r.Context()) // signed-in work keeps the machine up longer (idle.go)
+				h(w, r)
+			}))).ServeHTTP(w, r)
 		}
 	}
 
@@ -329,7 +332,10 @@ func main() {
 			return h
 		}
 		return func(w http.ResponseWriter, r *http.Request) {
-			sm.RequireAuth(http.HandlerFunc(h)).ServeHTTP(w, r)
+			sm.RequireAuth(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				markSignedIn(r.Context())
+				h(w, r)
+			})).ServeHTTP(w, r)
 		}
 	}
 	withRole := func(roles []string, h http.HandlerFunc) http.HandlerFunc {
@@ -548,8 +554,12 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	var root http.Handler = withCORS(mux)
+	if local != nil {
+		root = local.guard(mux, port) // its own pages only, and no CORS
+	}
 	log.Printf("LLM Optimizer backend starting on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, startIdleShutdown(withCORS(mux))))
+	log.Fatal(http.ListenAndServe(addr, startIdleShutdown(root)))
 }
 
 func withCORS(next http.Handler) http.Handler {
@@ -6744,7 +6754,13 @@ func handleRedditDiscover(mongoDB *MongoDB, encKey []byte, fallbackKey string, s
 			models, _ := availableModels(r.Context(), openai, key)
 			model := redditSearchModel(models)
 			progress(fmt.Sprintf("Reddit blocked direct searches, so searching Reddit through OpenAI's web search (%s) instead...", model))
-			threads, err = redditDiscoverViaWebSearch(r.Context(), key, model, allTerms, timeFilter, progress)
+			var chosen []string // the user's subreddits, as a hint for the search
+			for _, s := range subs {
+				if !strings.EqualFold(s, "all") {
+					chosen = append(chosen, s)
+				}
+			}
+			threads, err = redditDiscoverViaWebSearch(r.Context(), key, model, allTerms, chosen, timeFilter, progress)
 			if err != nil {
 				sendSSE(w, flusher, "error", map[string]string{"message": "Reddit blocked direct searches, and searching Reddit through OpenAI failed: " + providerFailureReason(err)})
 				return

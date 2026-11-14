@@ -23,6 +23,9 @@ primary_region = "ewr"
   # after a few minutes, which could happen mid-way through working on a report.
   LLMOPT_IDLE_SHUTDOWN = "60m"
   LLMOPT_IDLE_SHUTDOWN_VISITOR = "10m"
+  # LastSaaS routes pass through llmopt (deploy/Caddyfile) so idle shutdown sees them.
+  LLMOPT_LASTSAAS_PROXY = "127.0.0.1:8092"
+  LLMOPT_LASTSAAS_UPSTREAM = "http://127.0.0.1:8091"
 
 [http_service]
   internal_port = 8080

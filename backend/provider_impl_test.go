@@ -880,7 +880,8 @@ func TestOpenAIVerifyKey_Invalid(t *testing.T) {
 func TestOpenAIVerifyKey_NoCredits(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(429)
-		w.Write([]byte(`{"error":{"message":"exceeded billing quota"}}`))
+		// OpenAI's real out-of-credit answer.
+		w.Write([]byte(`{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}`))
 	}))
 	defer server.Close()
 	withAllProviderBases(t, server)

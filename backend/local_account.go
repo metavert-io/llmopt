@@ -8,7 +8,10 @@ package main
 //
 // Every request acts as the configured account, with its tenant-scoped data
 // and its saved API keys, so the server listens on a loopback address only;
-// publish it to your own devices with something like `tailscale serve`. The
+// publish it to your own devices with something like `tailscale serve`, and
+// list that address in LLMOPT_LOCAL_ORIGINS. Only the copy's own pages can use
+// it: requests from other sites (another tab in the same browser) and requests
+// addressed to any other host name (DNS rebinding) are refused. The
 // hosted service owns the database: this mode runs no migrations and none of
 // the background jobs (cleanup, provider health checks, screenshots).
 
@@ -20,7 +23,9 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"strings"
 
 	"llmopt/internal/saas"
 )
@@ -88,4 +93,52 @@ func randomSecret() string {
 		log.Fatalf("generating a secret: %v", err)
 	}
 	return hex.EncodeToString(b)
+}
+
+// guard lets only the local copy's own pages reach it. A browser on a device
+// that can reach the copy would otherwise let any web page call it, and every
+// call acts as the account. It checks:
+//   - Host: loopback on this port, or a host from LLMOPT_LOCAL_ORIGINS (the
+//     address the copy is published at, e.g. https://my-mac.example.ts.net:8448),
+//     which stops DNS rebinding;
+//   - Origin, when the browser sends one: the same list;
+//   - Sec-Fetch-Site: never "cross-site".
+//
+// It sends no CORS headers, so other origins can't read responses either.
+func (la *localAccount) guard(next http.Handler, port string) http.Handler {
+	origins, hosts := map[string]bool{}, map[string]bool{}
+	for _, h := range []string{"127.0.0.1", "localhost", "[::1]"} {
+		origins["http://"+h+":"+port] = true
+		hosts[h+":"+port] = true
+	}
+	for _, o := range strings.Split(os.Getenv("LLMOPT_LOCAL_ORIGINS"), ",") {
+		o = strings.TrimRight(strings.TrimSpace(o), "/")
+		if o == "" {
+			continue
+		}
+		u, err := url.Parse(o)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			log.Printf("Local account mode: ignoring LLMOPT_LOCAL_ORIGINS entry %q (want scheme://host[:port])", o)
+			continue
+		}
+		origins[u.Scheme+"://"+u.Host] = true
+		hosts[u.Host] = true
+	}
+	refuse := func(w http.ResponseWriter, why string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `{"error":%q}`, "this local copy only answers its own pages ("+why+")")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case !hosts[r.Host]:
+			refuse(w, "unknown host; add the address you open it at to LLMOPT_LOCAL_ORIGINS")
+		case r.Header.Get("Origin") != "" && !origins[r.Header.Get("Origin")]:
+			refuse(w, "request from another site")
+		case r.Header.Get("Sec-Fetch-Site") == "cross-site":
+			refuse(w, "request from another site")
+		default:
+			next.ServeHTTP(w, r)
+		}
+	})
 }
