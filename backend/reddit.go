@@ -308,7 +308,7 @@ func redditDiscoverThreads(subreddits []string, searchTerms []string, timeFilter
 	}
 
 	searchNum, answered, blocked := 0, 0, 0
-	var firstErr error
+	var firstErr, blockedErr error
 	for _, sub := range subreddits {
 		for _, term := range searchTerms {
 			searchNum++
@@ -324,6 +324,9 @@ func redditDiscoverThreads(subreddits []string, searchTerms []string, timeFilter
 				}
 				if errors.Is(err, errRedditBlocked) {
 					blocked++
+					if blockedErr == nil {
+						blockedErr = err
+					}
 					if answered == 0 && blocked >= 2 {
 						return nil, err // Reddit is refusing these requests; the rest would be refused too
 					}
@@ -345,6 +348,9 @@ func redditDiscoverThreads(subreddits []string, searchTerms []string, timeFilter
 		}
 	}
 
+	if answered == 0 && blockedErr != nil {
+		return nil, blockedErr // Reddit refused some searches and none worked: report the block, so the fallback runs
+	}
 	if answered == 0 && firstErr != nil {
 		return nil, firstErr // every search failed: say why rather than "nothing found"
 	}

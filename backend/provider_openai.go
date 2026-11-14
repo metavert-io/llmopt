@@ -260,7 +260,7 @@ func (p *OpenAIProvider) VerifyKey(ctx context.Context, apiKey string) (string, 
 	case resp.StatusCode == 429:
 		errBody, _ := io.ReadAll(resp.Body)
 		errStr := strings.ToLower(string(errBody))
-		if strings.Contains(errStr, "quota") || strings.Contains(errStr, "billing") || strings.Contains(errStr, "exceeded") {
+		if isBillingMessage(errStr) { // a plain rate limit means the key works
 			return "no_credits", nil
 		}
 		return "active", nil

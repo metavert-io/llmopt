@@ -104,6 +104,11 @@ func (p *GeminiProvider) Call(ctx context.Context, apiKey, model, prompt string,
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == 429 {
+		// Depleted prepaid credits or billing: the key can't be used, so don't
+		// retry it as a rate limit.
+		if containsAny(strings.ToLower(string(respBody)), geminiBillingMarkers...) {
+			return "", &ProviderHTTPError{Provider: "Gemini", Status: resp.StatusCode, Body: string(respBody)}
+		}
 		return "", geminiQuotaError(respBody)
 	}
 	if resp.StatusCode != 200 {
@@ -297,7 +302,7 @@ func (p *GeminiProvider) VerifyKey(ctx context.Context, apiKey string) (string, 
 		// key can't be used.
 		errBody, _ := io.ReadAll(resp.Body)
 		errStr := strings.ToLower(string(errBody))
-		if containsAny(errStr, "credits are depleted", "prepay", "billing account", "billing is not enabled", "billing_disabled") {
+		if containsAny(errStr, geminiBillingMarkers...) {
 			return "no_credits", nil
 		}
 		return "active", nil

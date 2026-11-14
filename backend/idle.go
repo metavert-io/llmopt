@@ -13,8 +13,11 @@ package main
 // on the next request (auto_start_machines).
 
 import (
+	"context"
 	"log"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -41,26 +44,51 @@ func newIdleTracker(workWindow, visitorWindow time.Duration, now func() time.Tim
 	return t
 }
 
-// windowFor returns how long a request keeps the machine up: signed-in work
-// gets the long window, anonymous visits the short one, and background polls
-// (health checks, which open tabs send every few minutes) none at all.
-func (t *idleTracker) windowFor(r *http.Request) time.Duration {
-	if r.Method == http.MethodOptions || strings.HasPrefix(r.URL.Path, "/api/health") || r.URL.Path == "/health" {
-		return 0
-	}
-	if r.Header.Get("Authorization") != "" {
-		return t.workWindow
-	}
-	return t.visitorWindow
+// isPoll reports background requests that keep nothing up: preflights and
+// health checks (Fly's, and the ones open tabs send every few minutes).
+func isPoll(r *http.Request) bool {
+	return r.Method == http.MethodOptions || strings.HasPrefix(r.URL.Path, "/api/health") || r.URL.Path == "/health"
 }
 
-func (t *idleTracker) begin(window time.Duration) {
+// signedInKey marks, in a request's context, whether the request turned out to
+// be signed-in work. The auth wrappers set it once a token has been checked; a
+// mere Authorization header doesn't count.
+type signedInKey struct{}
+
+type signedInFlag struct {
+	mu  sync.Mutex
+	set bool
+}
+
+// markSignedIn records that the request passed authentication (no-op outside
+// idle tracking).
+func markSignedIn(ctx context.Context) {
+	if f, ok := ctx.Value(signedInKey{}).(*signedInFlag); ok {
+		f.mu.Lock()
+		f.set = true
+		f.mu.Unlock()
+	}
+}
+
+func (f *signedInFlag) get() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.set
+}
+
+// begin admits a request, unless the machine is already stopping. Requests
+// count as visits until they turn out to be signed-in work (see end).
+func (t *idleTracker) begin(window time.Duration) bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	if t.stopping {
+		return false
+	}
 	t.inFlight++
 	if until := t.now().Add(window); window > 0 && until.After(t.keepUntil) {
 		t.keepUntil = until
 	}
+	return true
 }
 
 func (t *idleTracker) end(window time.Duration) {
@@ -73,15 +101,65 @@ func (t *idleTracker) end(window time.Duration) {
 	}
 }
 
-// wrap records every request; nothing is stopped while any request is in flight.
+// wrap records every request; nothing is stopped while any request is in
+// flight. A request counts as signed-in work (the long window) only when the
+// app's auth wrapper marked it so; once the machine has decided to stop, new
+// requests are turned away with 503 (the page retries, which wakes it again).
 func (t *idleTracker) wrap(next http.Handler) http.Handler {
+	return t.wrapWith(next, func(r *http.Request, signedIn bool, _ int) bool { return signedIn })
+}
+
+// wrapWith is wrap with a custom test for signed-in work, given whether the
+// app marked the request and the response status.
+func (t *idleTracker) wrapWith(next http.Handler, isWork func(r *http.Request, marked bool, status int) bool) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		window := t.windowFor(r)
-		t.begin(window)
-		defer t.end(window)
-		next.ServeHTTP(w, r)
+		poll := isPoll(r)
+		start := t.visitorWindow
+		if poll {
+			start = 0
+		}
+		if !t.begin(start) {
+			w.Header().Set("Retry-After", "5")
+			http.Error(w, "the server is restarting; try again in a few seconds", http.StatusServiceUnavailable)
+			return
+		}
+		flag := &signedInFlag{}
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		window := start
+		defer func() { t.end(window) }()
+		next.ServeHTTP(rec, r.WithContext(context.WithValue(r.Context(), signedInKey{}, flag)))
+		if !poll && isWork(r, flag.get(), rec.status) {
+			window = t.workWindow
+		}
 	})
 }
+
+// statusRecorder notes the response status and keeps streaming working.
+type statusRecorder struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	if !s.wroteHeader {
+		s.status, s.wroteHeader = code, true
+	}
+	s.ResponseWriter.WriteHeader(code)
+}
+
+func (s *statusRecorder) Write(b []byte) (int, error) {
+	s.wroteHeader = true
+	return s.ResponseWriter.Write(b)
+}
+
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (s *statusRecorder) Unwrap() http.ResponseWriter { return s.ResponseWriter }
 
 // check stops the machine if it has been idle long enough. It reports whether
 // it asked for a stop.
@@ -132,16 +210,66 @@ func stopViaSupervisord() bool {
 	return true
 }
 
+// lastSaaSProxy forwards LastSaaS's routes (sign-in, billing, webhooks, admin)
+// to LastSaaS through the idle tracker, so they count as activity and as work
+// in flight: shutdown stops LastSaaS too. Caddy sends those routes here (and
+// straight to LastSaaS if this proxy is down). The forwarding headers Caddy set
+// are passed on unchanged, so LastSaaS still sees the real client address.
+func lastSaaSProxy(upstream *url.URL, t *idleTracker) http.Handler {
+	rp := &httputil.ReverseProxy{
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.SetURL(upstream)
+			pr.Out.Host = pr.In.Host
+			for _, h := range []string{"X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded"} {
+				if v, ok := pr.In.Header[h]; ok {
+					pr.Out.Header[h] = v
+				}
+			}
+		},
+		FlushInterval: -1,
+	}
+	if t == nil {
+		return rp
+	}
+	// LastSaaS checks its own tokens: a signed-in request it answers without
+	// an auth error counts as work.
+	return t.wrapWith(rp, func(r *http.Request, _ bool, status int) bool {
+		return r.Header.Get("Authorization") != "" && status < 400
+	})
+}
+
+// startLastSaaSProxy serves lastSaaSProxy on LLMOPT_LASTSAAS_PROXY (e.g.
+// 127.0.0.1:8092) for LLMOPT_LASTSAAS_UPSTREAM (e.g. http://127.0.0.1:8091),
+// when both are set.
+func startLastSaaSProxy(t *idleTracker) {
+	listen, up := os.Getenv("LLMOPT_LASTSAAS_PROXY"), os.Getenv("LLMOPT_LASTSAAS_UPSTREAM")
+	if listen == "" || up == "" {
+		return
+	}
+	upstream, err := url.Parse(up)
+	if err != nil || upstream.Host == "" {
+		log.Printf("LastSaaS proxy disabled: invalid LLMOPT_LASTSAAS_UPSTREAM %q", up)
+		return
+	}
+	go func() {
+		log.Printf("LastSaaS proxy on %s → %s (idle tracking: %v)", listen, upstream, t != nil)
+		log.Printf("LastSaaS proxy stopped: %v", http.ListenAndServe(listen, lastSaaSProxy(upstream, t)))
+	}()
+}
+
 // startIdleShutdown wraps the handler with idle tracking when
-// LLMOPT_IDLE_SHUTDOWN is set; otherwise it returns the handler unchanged.
+// LLMOPT_IDLE_SHUTDOWN is set; otherwise it returns the handler unchanged. It
+// also starts the LastSaaS proxy when configured.
 func startIdleShutdown(h http.Handler) http.Handler {
 	raw := os.Getenv("LLMOPT_IDLE_SHUTDOWN")
 	if raw == "" {
+		startLastSaaSProxy(nil)
 		return h
 	}
 	work, err := time.ParseDuration(raw)
 	if err != nil || work <= 0 {
 		log.Printf("Idle shutdown disabled: invalid LLMOPT_IDLE_SHUTDOWN %q", raw)
+		startLastSaaSProxy(nil)
 		return h
 	}
 	visitor := 10 * time.Minute
@@ -155,6 +283,7 @@ func startIdleShutdown(h http.Handler) http.Handler {
 	}
 	t := newIdleTracker(work, visitor, time.Now, stopViaSupervisord)
 	go t.run(time.Minute)
+	startLastSaaSProxy(t)
 	log.Printf("Idle shutdown enabled: stops after %s without signed-in activity (%s for visitors)", work, visitor)
 	return t.wrap(h)
 }

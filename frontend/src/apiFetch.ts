@@ -30,7 +30,9 @@ export async function apiFetch(
 
 // Statuses the proxy returns while the server is still starting up. The server
 // sleeps when idle and wakes on the next request, so a request can arrive first.
-const WAKING_STATUSES = new Set([502, 503, 504]);
+// Not 504: a gateway timeout can come after the server has started the work, and
+// sending the request again would start it twice.
+const WAKING_STATUSES = new Set([502, 503]);
 
 function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -51,7 +53,7 @@ function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
 }
 
 /**
- * apiFetch for starting a job, tolerant of a sleeping server: on 502/503/504 or
+ * apiFetch for starting a job, tolerant of a sleeping server: on 502/503 or
  * a network error it waits and retries for up to `maxWaitMs`, calling
  * `onWaiting` once so the page can say what's happening. The request body must
  * be a string (it is sent again on retry).

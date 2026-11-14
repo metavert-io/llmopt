@@ -18,14 +18,23 @@
 # at once. Only connection failures are retried (nothing reached the backend);
 # requests that did reach a backend are not. Caddy 2.6 can only replay a POST
 # body it has buffered, so the llmopt route sets buffer_requests (its request
-# bodies are small JSON). LastSaaS may take uploads, so it isn't buffered and
-# its retries cover GETs.
+# bodies are small JSON, capped at 5MB so buffering can't be used to exhaust
+# memory). LastSaaS may take uploads, so it isn't buffered and its retries cover
+# GETs.
+#
+# Idle shutdown (backend/idle.go): LastSaaS routes go through llmopt's tracking
+# proxy on :8092, which forwards them to LastSaaS (:8091) and counts them as
+# activity and as work in flight, so the machine never stops in the middle of a
+# sign-in, a checkout or a webhook. If that proxy is down, Caddy goes straight
+# to LastSaaS (lb_policy first; a failed connection takes :8092 out for 30s).
 
 :8080 {
 	# LastSaaS API routes — use path_regexp to match both /api/X and /api/X/*
 	@lastsaas path_regexp ^/api/(auth|users|tenants|tenant|billing|plans|messages|admin|branding|bundles|stripe|webhooks|bootstrap|credit-bundles|announcements|usage|docs|telemetry)(/.*)?$
 	handle @lastsaas {
-		reverse_proxy localhost:8091 {
+		reverse_proxy 127.0.0.1:8092 localhost:8091 {
+			lb_policy first
+			fail_duration 30s
 			lb_try_duration 45s
 			lb_try_interval 250ms
 		}
@@ -39,6 +48,9 @@
 
 	# Everything else goes to llmopt backend
 	handle {
+		request_body {
+			max_size 5MB
+		}
 		reverse_proxy localhost:8090 {
 			lb_try_duration 45s
 			lb_try_interval 250ms

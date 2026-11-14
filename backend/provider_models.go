@@ -108,8 +108,18 @@ const (
 	failKey                          // the key is invalid, revoked or out of credit
 )
 
+// geminiBillingMarkers are what Gemini says when a key can't be used for money
+// reasons (prepaid credits used up, no billing account), as opposed to a quota.
+var geminiBillingMarkers = []string{"credits are depleted", "prepay", "billing account", "billing is not enabled", "billing_disabled"}
+
+// isBillingMessage reports an error body (lowercased) that says the key is out
+// of credit or has a billing problem. A bare "billing" isn't enough: OpenAI's
+// ordinary rate-limit message links to its billing page.
 func isBillingMessage(body string) bool {
-	for _, s := range []string{"credit balance", "insufficient_quota", "exceeded your current quota", "billing", "doesn't have any credits", "does not have any credits", "out of credits", "spending limit", "payment required"} {
+	if containsAny(body, geminiBillingMarkers...) {
+		return true
+	}
+	for _, s := range []string{"credit balance", "insufficient_quota", "exceeded your current quota", "billing_hard_limit", "billing hard limit", "billing_not_active", "doesn't have any credits", "does not have any credits", "out of credits", "spending limit", "payment required"} {
 		if strings.Contains(body, s) {
 			return true
 		}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -85,7 +86,7 @@ func TestOpenAIRedditSearch_KeepsOnlySourcedThreads(t *testing.T) {
 	defer server.Close()
 	setVar(t, &openaiAPIBase, server.URL)
 
-	threads, err := openaiRedditSearch(t.Context(), "k", "gpt-5.4-mini", []string{"Example Health", "online prescriptions"}, "year")
+	threads, err := openaiRedditSearch(t.Context(), "k", "gpt-5.4-mini", []string{"Example Health", "online prescriptions"}, []string{"examplesub"}, "year")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +107,8 @@ func TestOpenAIRedditSearch_KeepsOnlySourcedThreads(t *testing.T) {
 	if inc, _ := json.Marshal(body["include"]); !strings.Contains(string(inc), "web_search_call.action.sources") {
 		t.Errorf("include = %s", inc)
 	}
-	if in, _ := json.Marshal(body["input"]); !strings.Contains(string(in), `\"Example Health\"`) || !strings.Contains(string(in), "past year") {
+	if in, _ := json.Marshal(body["input"]); !strings.Contains(string(in), `\"Example Health\"`) || !strings.Contains(string(in), "past year") ||
+		!strings.Contains(string(in), "in particular in r/examplesub") {
 		t.Errorf("input = %s", in)
 	}
 }
@@ -214,5 +216,28 @@ func TestBuildRedditAuthorityPrompt_WebSearchThread(t *testing.T) {
 	}
 	if strings.Contains(p, "Score: 0") || strings.Contains(p, "[0 pts]") {
 		t.Error("prompt reports unknown engagement as zero")
+	}
+}
+
+// A blocked search hidden behind another error on the first search still
+// counts as Reddit's block, so the web-search fallback runs.
+func TestRedditDiscover_BlockAfterOtherErrorIsReported(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if calls == 1 {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
+		w.WriteHeader(http.StatusForbidden)
+	}))
+	defer server.Close()
+	withTestRedditBase(t, server)
+	setVar(t, &warpState.client, nil)
+	setVar(t, &warpState.checkedAt, time.Now())
+
+	_, err := redditDiscoverThreads([]string{"x"}, []string{"a", "b"}, "year", 5, 0, nil)
+	if !errors.Is(err, errRedditBlocked) {
+		t.Errorf("err = %v, want errRedditBlocked", err)
 	}
 }

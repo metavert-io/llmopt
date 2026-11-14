@@ -560,3 +560,34 @@ func TestTestDefaultModel_Fallbacks(t *testing.T) {
 		t.Errorf("empty list = %q", id)
 	}
 }
+
+// OpenAI's ordinary rate-limit message links to its billing page; that must not
+// read as "out of credit" (which drops the provider from a test run).
+func TestOpenAIRateLimitIsNotBilling(t *testing.T) {
+	rateLimit := `{"error":{"message":"Rate limit reached for gpt-5.5 in organization org-x on requests per min (RPM): Limit 3, Used 3, Requested 1. Please try again in 20s. Visit https://platform.openai.com/account/rate-limits to learn more. You can increase your rate limit by adding a payment method to your account at https://platform.openai.com/account/billing.","type":"requests","code":"rate_limit_exceeded"}}`
+	quota := `{"error":{"message":"You exceeded your current quota, please check your plan and billing details.","type":"insufficient_quota","code":"insufficient_quota"}}`
+	var calls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(429)
+		if strings.Contains(r.URL.Path, "/models") || calls%2 == 1 {
+			w.Write([]byte(rateLimit))
+			return
+		}
+		w.Write([]byte(quota))
+	}))
+	defer server.Close()
+	withAllProviderBases(t, server)
+
+	_, err := (&OpenAIProvider{}).Call(context.Background(), "k", "gpt-5.5", "q", 100)
+	if c := classifyProviderError(err); c != failRetry {
+		t.Errorf("rate limit classified %v, want failRetry (err %v)", c, err)
+	}
+	_, err = (&OpenAIProvider{}).Call(context.Background(), "k", "gpt-5.5", "q", 100)
+	if c := classifyProviderError(err); c != failKey {
+		t.Errorf("insufficient_quota classified %v, want failKey (err %v)", c, err)
+	}
+	if isBillingMessage(strings.ToLower(rateLimit)) || !isBillingMessage(strings.ToLower(quota)) {
+		t.Error("isBillingMessage misreads the rate-limit or quota message")
+	}
+}
