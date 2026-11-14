@@ -531,7 +531,7 @@ func TestHandleDiscoverCompetitors_WithBrand(t *testing.T) {
 func TestHandleRedditDiscover_InvalidBody(t *testing.T) {
 	db := testMongoDB(t)
 
-	handler := handleRedditDiscover(db)
+	handler := handleRedditDiscover(db, testEncKey(), "fallback-key", false)
 	// Send non-JSON body
 	rawReq := httptest.NewRequest("POST", "/api/reddit/discover", bytes.NewReader([]byte("not-json")))
 	rawReq = rawReq.WithContext(testAuthContext("test-tenant", "test-user"))
@@ -557,7 +557,7 @@ func TestHandleRedditDiscover_BrandNameAsSearchTerm(t *testing.T) {
 	defer redditServer.Close()
 	withTestRedditBase(t, redditServer)
 
-	handler := handleRedditDiscover(db)
+	handler := handleRedditDiscover(db, testEncKey(), "fallback-key", false)
 	// Include brand_name but no explicit subreddits → "all" gets appended
 	req := testRequest(t, "POST", "/api/reddit/discover", map[string]any{
 		"domain":       "brand.com",

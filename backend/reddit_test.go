@@ -128,23 +128,28 @@ func TestRedditDiscoverThreads_AllSubreddits(t *testing.T) {
 
 func TestRedditDiscoverThreads_SearchError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusInternalServerError)
+		if r.URL.Query().Get("q") == "bad" {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Write([]byte(`{"data":{"children":[]}}`))
 	}))
 	defer server.Close()
 	withTestRedditBase(t, server)
 
-	// Should return empty, not error (search errors are non-fatal)
+	// One failed search is non-fatal when another search answered.
 	threads, err := redditDiscoverThreads(
 		[]string{"golang"},
-		[]string{"test"},
+		[]string{"bad", "good"},
 		"year", 5, 0, nil,
 	)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(threads) != 0 {
-		t.Errorf("expected empty threads on error, got %d", len(threads))
+		t.Errorf("expected empty threads, got %d", len(threads))
 	}
+	// When every search fails, the error comes back (see TestRedditDiscover_AllFailedReturnsError).
 }
 
 func TestRedditDiscoverThreads_Deduplication(t *testing.T) {

@@ -271,7 +271,7 @@ func main() {
 	mux.HandleFunc("POST /api/video/search-terms", withAuth(handleVideoSearchTerms(mongoDB)))
 
 	// Reddit Authority Analyzer
-	mux.HandleFunc("POST /api/reddit/discover", withAuth(withRL(ratelimit.RedditDiscoverLimit, handleRedditDiscover(mongoDB))))
+	mux.HandleFunc("POST /api/reddit/discover", withAuth(withRL(ratelimit.RedditDiscoverLimit, handleRedditDiscover(mongoDB, encryptionKey, apiKey, saasEnabled))))
 	mux.HandleFunc("POST /api/reddit/analyze", withAuth(withRL(ratelimit.RedditAnalyzeLimit, handleRedditAnalyze(mongoDB, encryptionKey, apiKey, saasEnabled))))
 	mux.HandleFunc("GET /api/reddit/analyses/{domain}", withAuth(handleGetRedditAnalysis(mongoDB)))
 	mux.HandleFunc("GET /api/reddit/analyses", withAuth(handleListRedditAnalyses(mongoDB)))
@@ -6652,7 +6652,7 @@ func handleVideoSearchTerms(mongoDB *MongoDB) http.HandlerFunc {
 
 // ── Reddit Authority Analyzer handlers ─────────────────────────────
 
-func handleRedditDiscover(mongoDB *MongoDB) http.HandlerFunc {
+func handleRedditDiscover(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.Header().Set("Cache-Control", "no-cache")
@@ -6731,8 +6731,28 @@ func handleRedditDiscover(mongoDB *MongoDB) http.HandlerFunc {
 		progress(fmt.Sprintf("Discovering Reddit threads across %d subreddits with %d search terms...", len(subs), len(allTerms)))
 
 		threads, err := redditDiscoverThreads(subs, allTerms, timeFilter, 15, 2*time.Second, progress)
+		webSearch := false
+		if errors.Is(err, errRedditBlocked) {
+			// Reddit refuses anonymous searches; find the threads through OpenAI's
+			// web search instead (reddit_websearch.go).
+			key, kerr := resolveProviderKey(r.Context(), mongoDB, encKey, fallbackKey, saasEnabled, "openai")
+			if kerr != nil || key == "" {
+				sendSSE(w, flusher, "error", map[string]string{"message": "Reddit blocked this search (HTTP 403, \"blocked by network security\"): it now refuses anonymous searches like the ones this tab makes. Add an OpenAI API key in Settings and this tab will search Reddit through OpenAI's web search instead."})
+				return
+			}
+			openai := getProvider("openai")
+			models, _ := availableModels(r.Context(), openai, key)
+			model := redditSearchModel(models)
+			progress(fmt.Sprintf("Reddit blocked direct searches, so searching Reddit through OpenAI's web search (%s) instead...", model))
+			threads, err = redditDiscoverViaWebSearch(r.Context(), key, model, allTerms, timeFilter, progress)
+			if err != nil {
+				sendSSE(w, flusher, "error", map[string]string{"message": "Reddit blocked direct searches, and searching Reddit through OpenAI failed: " + providerFailureReason(err)})
+				return
+			}
+			webSearch = true
+		}
 		if err != nil {
-			sendSSE(w, flusher, "error", map[string]string{"message": "Reddit discovery failed: " + err.Error()})
+			sendSSE(w, flusher, "error", map[string]string{"message": "Reddit discovery failed: " + truncateErr(err, 200)})
 			return
 		}
 
@@ -6741,15 +6761,21 @@ func handleRedditDiscover(mongoDB *MongoDB) http.HandlerFunc {
 			return
 		}
 
-		progress(fmt.Sprintf("Found %d unique threads. Fetching thread details...", len(threads)))
-
-		// Sort by score descending and fetch top threads with comments
-		sortThreadsByScore(threads)
 		maxFetch := 40
 		if len(threads) < maxFetch {
 			maxFetch = len(threads)
 		}
-		detailed := redditFetchThreadDetails(threads[:maxFetch], maxFetch, 2*time.Second, progress)
+		var detailed []RedditThread
+		if webSearch {
+			// The search already gave a summary and reply excerpts; Reddit won't send more.
+			progress(fmt.Sprintf("Found %d unique threads through web search.", len(threads)))
+			detailed = threads[:maxFetch]
+		} else {
+			progress(fmt.Sprintf("Found %d unique threads. Fetching thread details...", len(threads)))
+			// Sort by score descending and fetch top threads with comments
+			sortThreadsByScore(threads)
+			detailed = redditFetchThreadDetails(threads[:maxFetch], maxFetch, 2*time.Second, progress)
+		}
 
 		// Build summaries for frontend
 		type threadSummary struct {
@@ -6763,6 +6789,12 @@ func handleRedditDiscover(mongoDB *MongoDB) http.HandlerFunc {
 			CreatedUTC  time.Time `json:"created_utc"`
 			IsSelfPost  bool      `json:"is_self_post"`
 			HasComments bool      `json:"has_comments"`
+			// Web-search threads carry their text to the analysis, since Reddit
+			// won't send the thread itself.
+			Source      string          `json:"source,omitempty"`
+			URL         string          `json:"url,omitempty"`
+			SelfText    string          `json:"self_text,omitempty"`
+			TopComments []RedditComment `json:"top_comments,omitempty"`
 		}
 		summaries := make([]threadSummary, len(detailed))
 		for i, t := range detailed {
@@ -6777,6 +6809,10 @@ func handleRedditDiscover(mongoDB *MongoDB) http.HandlerFunc {
 				CreatedUTC:  t.CreatedUTC,
 				IsSelfPost:  t.IsSelfPost,
 				HasComments: len(t.TopComments) > 0,
+			}
+			if t.Source == redditWebSearchSource {
+				summaries[i].Source, summaries[i].URL = t.Source, t.URL
+				summaries[i].SelfText, summaries[i].TopComments = t.SelfText, t.TopComments
 			}
 		}
 
@@ -6879,8 +6915,8 @@ func handleRedditAnalyze(mongoDB *MongoDB, encKey []byte, fallbackKey string, sa
 			}
 		}
 
-		// Fetch full thread details with comments
-		detailed := redditFetchThreadDetails(threadsToAnalyze, len(threadsToAnalyze), 2*time.Second, func(msg string) {
+		// Fetch full thread details with comments (web-search threads keep what the search gave)
+		detailed := redditDetailsForAnalysis(threadsToAnalyze, func(msg string) {
 			sendSSE(w, flusher, "status", map[string]string{"message": msg})
 		})
 
@@ -6994,6 +7030,7 @@ func handleRedditAnalyze(mongoDB *MongoDB, encKey []byte, fallbackKey string, sa
 				CreatedUTC:   t.CreatedUTC,
 				IsSelfPost:   t.IsSelfPost,
 				CommentCount: len(t.TopComments),
+				Source:       t.Source,
 			}
 		}
 
@@ -7126,9 +7163,14 @@ Analyze the following Reddit threads to assess this brand's Reddit authority—h
 `)
 
 	for i, t := range threads {
+		web := t.Source == redditWebSearchSource
 		sb.WriteString(fmt.Sprintf("### Thread %d: r/%s — %s\n", i+1, t.Subreddit, t.Title))
-		sb.WriteString(fmt.Sprintf("Score: %d | Upvote Ratio: %.0f%% | Comments: %d | Posted: %s\n",
-			t.Score, t.UpvoteRatio*100, t.NumComments, t.CreatedUTC.Format("2006-01-02")))
+		if web {
+			sb.WriteString("Found through web search: upvotes, comment counts and the date aren't available (unknown, not zero).\n")
+		} else {
+			sb.WriteString(fmt.Sprintf("Score: %d | Upvote Ratio: %.0f%% | Comments: %d | Posted: %s\n",
+				t.Score, t.UpvoteRatio*100, t.NumComments, t.CreatedUTC.Format("2006-01-02")))
+		}
 		sb.WriteString(fmt.Sprintf("Permalink: https://reddit.com%s\n", t.Permalink))
 
 		if t.SelfText != "" {
@@ -7136,11 +7178,19 @@ Analyze the following Reddit threads to assess this brand's Reddit authority—h
 			if len(text) > 1000 {
 				text = text[:1000] + "..."
 			}
-			sb.WriteString(fmt.Sprintf("\n**Post Body**:\n%s\n", text))
+			label := "Post Body"
+			if web {
+				label = "Summary of the thread (from web search)"
+			}
+			sb.WriteString(fmt.Sprintf("\n**%s**:\n%s\n", label, text))
 		}
 
 		if len(t.TopComments) > 0 {
-			sb.WriteString("\n**Top Comments**:\n")
+			if web {
+				sb.WriteString("\n**Reply excerpts (from web search)**:\n")
+			} else {
+				sb.WriteString("\n**Top Comments**:\n")
+			}
 			for j, c := range t.TopComments {
 				if j >= 10 {
 					break
@@ -7149,7 +7199,11 @@ Analyze the following Reddit threads to assess this brand's Reddit authority—h
 				if len(body) > 500 {
 					body = body[:500] + "..."
 				}
-				sb.WriteString(fmt.Sprintf("- [%d pts] %s\n", c.Score, body))
+				if web {
+					sb.WriteString(fmt.Sprintf("- %s\n", body))
+				} else {
+					sb.WriteString(fmt.Sprintf("- [%d pts] %s\n", c.Score, body))
+				}
 			}
 		}
 		sb.WriteString("\n---\n\n")

@@ -558,6 +558,7 @@ interface RedditThreadSummary {
   created_utc: string
   is_self_post: boolean
   comment_count?: number
+  source?: string // 'web_search': found through web search, no upvotes or comment counts
 }
 
 interface RedditAnalysis {
@@ -961,6 +962,8 @@ export default function App() {
   const [redditAnalyzing, setRedditAnalyzing] = useState(false)
   const redditAbortRef = useRef<AbortController | null>(null)
   const [redditMessages, setRedditMessages] = useState<string[]>([])
+  // Why the last Discover failed; shown on the input view, which the run returns to.
+  const [redditDiscoverError, setRedditDiscoverError] = useState('')
   const [redditAnalysis, setRedditAnalysis] = useState<RedditAnalysis | null>(null)
   const [redditAnalysisList, setRedditAnalysisList] = useState<RedditAnalysisSummary[]>([])
   const [redditDomain, setRedditDomain] = useState('')
@@ -2138,6 +2141,7 @@ export default function App() {
     if (!redditDomain.trim()) return
     setRedditDiscovering(true)
     setRedditMessages([])
+    setRedditDiscoverError('')
     setDiscoveredThreads([])
     setSelectedThreadIds(new Set())
     setRedditView('discovering')
@@ -2211,6 +2215,7 @@ export default function App() {
                 setRedditView('review')
               } else if (currentEvent === 'error') {
                 setRedditMessages(prev => [...prev, data.message || 'Discovery failed'])
+                setRedditDiscoverError(data.message || 'Discovery failed')
                 setRedditView('input')
               }
             } catch { /* ignore malformed JSON */ }
@@ -2220,6 +2225,7 @@ export default function App() {
       }
     } catch (err) {
       setRedditMessages(['Connection failed: ' + (err as Error).message])
+      setRedditDiscoverError('Connection failed: ' + (err as Error).message)
       setRedditView('input')
     } finally {
       setRedditDiscovering(false)
@@ -3002,6 +3008,7 @@ export default function App() {
   // Auto-scroll SSE message containers to bottom
   useEffect(() => { videoMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [videoMessages])
   useEffect(() => { redditMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [redditMessages])
+  useEffect(() => { setRedditDiscoverError('') }, [redditDomain])
   useEffect(() => { searchMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [searchMessages])
   useEffect(() => { testMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [testMessages])
 
@@ -9155,6 +9162,11 @@ curl -X PATCH \\
                 >
                   {redditDiscovering ? 'Discovering...' : 'Discover Reddit Threads'}
                 </button>
+                {redditDiscoverError && !redditDiscovering && (
+                  <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 text-sm">
+                    {redditDiscoverError}
+                  </div>
+                )}
                 {redditSearchTerms.length === 0 && !redditDiscovering && (
                   <p className="text-dark-500 text-xs mt-2 text-center">
                     Add at least one search term above to discover threads. Target queries from the Brand Profile are added here automatically.
@@ -9302,7 +9314,7 @@ curl -X PATCH \\
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className="text-xs px-1.5 py-0.5 bg-orange-500/15 text-orange-300 border border-orange-500/20 rounded">r/{t.subreddit}</span>
-                              <span className="text-dark-500 text-xs">{t.score} pts · {t.num_comments} comments</span>
+                              <span className="text-dark-500 text-xs">{t.source === 'web_search' ? 'via web search' : `${t.score} pts · ${t.num_comments} comments`}</span>
                               <span className="text-dark-600 text-xs">· {fmtDate(t.created_utc)}</span>
                             </div>
                             <p className="text-white text-sm">{t.title}</p>
@@ -9637,7 +9649,7 @@ curl -X PATCH \\
                                 : 'bg-dark-700 text-dark-400'
                               }`}>{m.sentiment}</span>
                               {m.is_recommendation && <span className="text-xs px-1.5 py-0.5 bg-primary-500/15 text-primary-300 rounded">Recommends</span>}
-                              <span className="text-dark-500 text-xs">{m.score} pts</span>
+                              {m.score > 0 && <span className="text-dark-500 text-xs">{m.score} pts</span>}
                             </div>
                             <p className="text-white text-sm mb-1">{m.title}</p>
                             {m.context && <p className="text-dark-400 text-xs italic">&ldquo;{m.context}&rdquo;</p>}

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -37,6 +38,11 @@ var browserUAs = []string{
 func randomUA() string {
 	return browserUAs[rand.Intn(len(browserUAs))]
 }
+
+// errRedditBlocked is Reddit refusing a request outright (HTTP 403, "You've been
+// blocked by network security"). Reddit now answers anonymous JSON requests this
+// way from servers and home connections alike, so retrying doesn't help.
+var errRedditBlocked = errors.New("Reddit refused the request")
 
 // redditHTTPGet fetches a URL with browser-like headers, using WARP proxy if available.
 // It retries once via WARP on 429/403.
@@ -79,6 +85,9 @@ func redditHTTPGet(rawURL string) ([]byte, error) {
 		}
 	}
 
+	if status == 403 {
+		return nil, fmt.Errorf("%w (HTTP 403 for %s)", errRedditBlocked, rawURL)
+	}
 	return nil, fmt.Errorf("reddit HTTP %d for %s", status, rawURL)
 }
 
@@ -97,6 +106,7 @@ type RedditThread struct {
 	CreatedUTC   time.Time `json:"created_utc"`
 	TopComments  []RedditComment `json:"top_comments,omitempty"`
 	IsSelfPost   bool      `json:"is_self_post"`
+	Source       string    `json:"source,omitempty"` // redditWebSearchSource when found through web search
 }
 
 // RedditComment represents a parsed Reddit comment.
@@ -297,7 +307,8 @@ func redditDiscoverThreads(subreddits []string, searchTerms []string, timeFilter
 		totalSearches = len(searchTerms)
 	}
 
-	searchNum := 0
+	searchNum, answered, blocked := 0, 0, 0
+	var firstErr error
 	for _, sub := range subreddits {
 		for _, term := range searchTerms {
 			searchNum++
@@ -308,8 +319,18 @@ func redditDiscoverThreads(subreddits []string, searchTerms []string, timeFilter
 			threads, err := redditSearch(sub, term, timeFilter, maxPerQuery)
 			if err != nil {
 				log.Printf("Reddit search error (r/%s, %q): %v", sub, term, err)
+				if firstErr == nil {
+					firstErr = err
+				}
+				if errors.Is(err, errRedditBlocked) {
+					blocked++
+					if answered == 0 && blocked >= 2 {
+						return nil, err // Reddit is refusing these requests; the rest would be refused too
+					}
+				}
 				continue
 			}
+			answered++
 
 			for _, t := range threads {
 				if !seen[t.ID] {
@@ -324,6 +345,9 @@ func redditDiscoverThreads(subreddits []string, searchTerms []string, timeFilter
 		}
 	}
 
+	if answered == 0 && firstErr != nil {
+		return nil, firstErr // every search failed: say why rather than "nothing found"
+	}
 	return allThreads, nil
 }
 
@@ -346,6 +370,13 @@ func redditFetchThreadDetails(threads []RedditThread, maxThreads int, delayBetwe
 		full, err := redditFetchThread(threads[i].Permalink)
 		if err != nil {
 			log.Printf("Reddit thread fetch error (%s): %v", threads[i].Permalink, err)
+			if errors.Is(err, errRedditBlocked) {
+				// Reddit is refusing thread pages; keep what the search returned for the rest.
+				if statusFn != nil {
+					statusFn("Reddit refused to send thread details; continuing with what the search returned")
+				}
+				return append(result, threads[i:maxThreads]...)
+			}
 			// Keep the search-result version without comments
 			result = append(result, threads[i])
 		} else {
