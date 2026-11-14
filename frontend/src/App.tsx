@@ -2025,41 +2025,34 @@ export default function App() {
     }
   }, [])
 
+  // Fills the Reddit settings for a domain from its brand profile (subreddits,
+  // target queries) and its optimization questions. Runs once per domain (see
+  // the effect below), so terms the user adds afterwards aren't overwritten.
+  const redditPrefilledDomainRef = useRef<string | null>(null)
+  const optListRef = useRef(optList)
+  optListRef.current = optList
   const prepopulateRedditFromBrand = useCallback((domain: string) => {
     setRedditDomain(domain)
-
-    // Collect optimization questions for this domain
-    const domainOpts = optList.filter(o => domainKey(o.domain) === domainKey(domain))
-    const optQuestions = [...new Set(domainOpts.map(o => o.question))]
-
-    // Find brand profile
-    const brand = brandList.find(b => b.domain === domain)
-    if (brand) {
-      apiFetch(`/api/brands/${encodeURIComponent(domain)}`)
-        .then(res => res.ok ? res.json() : null)
-        .then((profile: BrandProfile | null) => {
-          if (profile) {
-            // Populate subreddits from brand intelligence
-            if (profile.presence?.subreddits?.length > 0) {
-              setRedditSubreddits(profile.presence.subreddits)
-            }
-            const brandTerms = profile.target_queries?.map(q => q.query) || []
-            const brandLower = new Set(brandTerms.map(t => t.toLowerCase()))
-            const uniqueOptQuestions = optQuestions.filter(q => !brandLower.has(q.toLowerCase()))
-            setRedditSearchTerms([...brandTerms, ...uniqueOptQuestions])
-            setRedditSearchTermSources(new Map([
-              ...brandTerms.map(t => [t, 'brand'] as [string, 'brand' | 'optimization']),
-              ...uniqueOptQuestions.map(q => [q, 'optimization'] as [string, 'brand' | 'optimization']),
-            ]))
-            setRedditSettingsOpen(false)
-          }
-        })
-        .catch(() => {})
-    } else if (optQuestions.length > 0) {
-      setRedditSearchTerms(optQuestions)
-      setRedditSearchTermSources(new Map(optQuestions.map(q => [q, 'optimization'] as [string, 'brand' | 'optimization'])))
-    }
-  }, [brandList, optList])
+    apiFetch(`/api/brands/${encodeURIComponent(domain)}`)
+      .then(res => res.ok ? res.json() : null)
+      .catch(() => null)
+      .then((profile: BrandProfile | null) => {
+        if (redditPrefilledDomainRef.current !== domain) return // the user moved on to another domain
+        const optQuestions = [...new Set(optListRef.current
+          .filter(o => domainKey(o.domain) === domainKey(domain))
+          .map(o => o.question))]
+        const brandTerms = profile?.target_queries?.map(q => q.query) || []
+        const brandLower = new Set(brandTerms.map(t => t.toLowerCase()))
+        const uniqueOptQuestions = optQuestions.filter(q => !brandLower.has(q.toLowerCase()))
+        setRedditSubreddits(profile?.presence?.subreddits || [])
+        setRedditSearchTerms([...brandTerms, ...uniqueOptQuestions])
+        setRedditSearchTermSources(new Map([
+          ...brandTerms.map(t => [t, 'brand'] as [string, 'brand' | 'optimization']),
+          ...uniqueOptQuestions.map(q => [q, 'optimization'] as [string, 'brand' | 'optimization']),
+        ]))
+        setRedditSettingsOpen(false)
+      })
+  }, [])
 
   // Optimization questions newer than the current reddit analysis
   const redditStaleOptimizations = useMemo(() => {
@@ -2834,21 +2827,30 @@ export default function App() {
     }
   }, [activeTab, fetchRedditAnalysisList, fetchSearchAnalysisList])
 
-  // Auto-prepopulate reddit from brand when switching to reddit tab
+  // Fill the Reddit settings from the brand profile the first time the tab
+  // shows a domain. (This used to run on every change to the analyses list,
+  // which it also refetched: an endless fetch loop that kept resetting the
+  // search terms and closing Settings.)
   useEffect(() => {
     if (sharedModeRef.current) return
-    if (activeTab === 'reddit') {
-      fetchRedditAnalysisList()
-      if (selectedDomain) {
-        prepopulateRedditFromBrand(selectedDomain)
-        // Auto-load existing report if one exists for this domain
-        const existing = redditAnalysisList.find(a => domainKey(a.domain) === domainKey(selectedDomain))
-        if (existing) {
-          loadRedditAnalysis(existing.domain)
-        }
-      }
+    if (activeTab !== 'reddit' || !selectedDomain) return
+    if (redditPrefilledDomainRef.current === selectedDomain) return
+    redditPrefilledDomainRef.current = selectedDomain
+    prepopulateRedditFromBrand(selectedDomain)
+  }, [activeTab, selectedDomain, prepopulateRedditFromBrand])
+
+  // Open the domain's saved Reddit report once, when the list shows one.
+  const redditAutoLoadedDomainRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (sharedModeRef.current) return
+    if (activeTab !== 'reddit' || !selectedDomain) return
+    if (redditAutoLoadedDomainRef.current === selectedDomain) return
+    const existing = redditAnalysisList.find(a => domainKey(a.domain) === domainKey(selectedDomain))
+    if (existing) {
+      redditAutoLoadedDomainRef.current = selectedDomain
+      loadRedditAnalysis(existing.domain)
     }
-  }, [activeTab, selectedDomain, prepopulateRedditFromBrand, fetchRedditAnalysisList, loadRedditAnalysis, redditAnalysisList])
+  }, [activeTab, selectedDomain, redditAnalysisList, loadRedditAnalysis])
 
   // Auto-load search analysis when switching to search tab
   useEffect(() => {
@@ -9153,6 +9155,11 @@ curl -X PATCH \\
                 >
                   {redditDiscovering ? 'Discovering...' : 'Discover Reddit Threads'}
                 </button>
+                {redditSearchTerms.length === 0 && !redditDiscovering && (
+                  <p className="text-dark-500 text-xs mt-2 text-center">
+                    Add at least one search term above to discover threads. Target queries from the Brand Profile are added here automatically.
+                  </p>
+                )}
 
                 {/* Previous analyses */}
                 {(redditAnalysisList.length > 0 || failedAnalyses.filter(f => f.feed_type === 'reddit').length > 0) && (
