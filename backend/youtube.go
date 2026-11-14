@@ -1331,7 +1331,7 @@ func discoverVideos(mongoDB *MongoDB, apiKey string, brandName, channelURL strin
 				progress(fmt.Sprintf("Found %d videos from your channel", len(videos)))
 			} else {
 				log.Printf("Warning: failed to fetch channel videos: %v", err)
-				progress(fmt.Sprintf("Could not fetch channel videos: %s", truncateErr(err, 200)))
+				progress(fmt.Sprintf("Could not fetch channel videos: %s", youtubeErrText(err)))
 			}
 		} else {
 			log.Printf("Warning: failed to resolve channel ID from %s: %v", channelURL, err)
@@ -1430,7 +1430,7 @@ func discoverVideos(mongoDB *MongoDB, apiKey string, brandName, channelURL strin
 	if totalSearches > 0 {
 		if failedCount > 0 {
 			progress(fmt.Sprintf("Completed %d searches — %d unique videos found (%d failed: %s)",
-				totalSearches, len(allVideos), failedCount, truncateErr(firstErr, 200)))
+				totalSearches, len(allVideos), failedCount, youtubeErrText(firstErr)))
 		} else {
 			progress(fmt.Sprintf("Completed %d searches — %d unique videos found", totalSearches, len(allVideos)))
 		}
@@ -1453,3 +1453,27 @@ func truncateErr(err error, max int) string {
 // ── Unused import guard ─────────────────────────────────────────────────
 
 var _ = mongo.ErrNoDocuments
+
+// isYouTubeQuotaError reports YouTube refusing a call because the API key's
+// project has used up a daily quota (HTTP 429 or 403 with a quota reason).
+func isYouTubeQuotaError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, s := range []string{"quotaExceeded", "Quota exceeded", "rateLimitExceeded", "dailyLimitExceeded"} {
+		if strings.Contains(msg, s) {
+			return true
+		}
+	}
+	return false
+}
+
+// youtubeErrText is a YouTube error for the progress notes: a used-up quota in
+// plain words, anything else as YouTube said it.
+func youtubeErrText(err error) string {
+	if isYouTubeQuotaError(err) {
+		return "the YouTube API key's daily quota is used up (Google resets it at midnight Pacific time); results already cached still count"
+	}
+	return truncateErr(err, 200)
+}
