@@ -4049,16 +4049,19 @@ export default function App() {
         })
         if (response.status === 429) return 'rate-limited'
         if (!response.ok || !response.body) return false
-        // Consume the SSE stream to completion, noting whether it ended in an error.
+        // Consume the SSE stream to completion, noting whether it ended in an
+        // error. Every chunk is checked whole (a result can be many KB after its
+        // "done" line), plus a short carry-over for a line split across chunks.
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
-        let tail = '', sawDone = false, sawError = false
+        let carry = '\n', sawDone = false, sawError = false
         while (true) {
           const { done: end, value } = await reader.read()
           if (end) break
-          tail = (tail + decoder.decode(value, { stream: true })).slice(-4096)
-          if (tail.includes('event: error')) sawError = true
-          if (tail.includes('event: done')) sawDone = true
+          const text = carry + decoder.decode(value, { stream: true })
+          if (text.includes('\nevent: error\n')) sawError = true
+          if (text.includes('\nevent: done\n')) sawDone = true
+          carry = text.slice(-32)
         }
         return sawDone && !sawError
       } catch {
