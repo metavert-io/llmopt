@@ -549,6 +549,10 @@ func TestTestDefaultModel_Fallbacks(t *testing.T) {
 	if id, _ := testDefaultModel("gemini", gemini[:2]); id != "gemini-3.6-flash-preview" {
 		t.Errorf("gemini with only previews = %q", id)
 	}
+	gemini4 := append([]ModelDef{{ID: "gemini-4-argon"}, {ID: "gemini-4-carbon"}, {ID: "gemini-4-hydrogen-lite"}, {ID: "gemini-4-hydrogen"}}, gemini...)
+	if id, note := testDefaultModel("gemini", gemini4); id != "gemini-4-hydrogen" || note != "what the free Gemini app uses" {
+		t.Errorf("gemini 4 = %q (%q)", id, note)
+	}
 	if id, _ := testDefaultModel("gemini", []ModelDef{{ID: "gemini-3.5-pro"}}); id != "gemini-3.5-pro" {
 		t.Errorf("gemini with no flash = %q", id)
 	}

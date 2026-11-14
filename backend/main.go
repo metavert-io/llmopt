@@ -8530,58 +8530,57 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			}
 		}
 
-		// Phase 1: ask every provider every query. Calls run concurrently (capped),
-		// interleaved across providers so one slow or rate-limited provider doesn't
-		// hold up the rest. Per-call failures are recorded, never fatal.
-		type queryJob struct {
-			run      *testProviderRun
-			queryIdx int
-			query    string
-		}
-		var jobs []queryJob
-		for qi, q := range req.Queries {
-			for _, run := range runs {
-				jobs = append(jobs, queryJob{run: run, queryIdx: qi, query: q.Query})
-			}
-		}
-		totalCalls := len(jobs)
+		// Phase 1: ask every provider every query. Each provider works through the
+		// queries in its own lanes (testCallsPerProvider at a time), so a slow or
+		// rate-limited provider holds up only its own queries, never the others'.
+		// Per-call failures are recorded, never fatal.
+		totalCalls := len(req.Queries) * len(runs)
 		notify(fmt.Sprintf("Testing %d queries across %d providers (%d total calls)...", len(req.Queries), len(runs), totalCalls))
 
 		responses := make([]testRawResponse, 0, totalCalls)
 		var respMu sync.Mutex
 		completedCalls := 0
 
-		var g errgroup.Group
-		g.SetLimit(6) // cap concurrent provider calls to stay within BYOK rate limits
-		for _, j := range jobs {
-			j := j
-			g.Go(func() error {
-				resp, model, err, skipped := j.run.ask(r.Context(), j.query, 4096)
-				j.run.record(err)
-				respMu.Lock()
-				completedCalls++
-				n := completedCalls
-				responses = append(responses, testRawResponse{
-					providerID:   j.run.provider.ProviderID(),
-					providerName: j.run.provider.Name(),
-					model:        model.Name,
-					queryIdx:     j.queryIdx,
-					response:     resp,
-					err:          err,
-				})
-				respMu.Unlock()
-				if skipped {
-					return nil
-				}
-				outcome := ""
-				if err != nil {
-					outcome = " — no answer"
-				}
-				notify(fmt.Sprintf("[%d/%d] %s (%s): \"%s\"%s", n, totalCalls, j.run.provider.Name(), model.Name, truncateStr(j.query, 60), outcome))
-				return nil
-			})
+		var lanes sync.WaitGroup
+		for _, run := range runs {
+			queue := make(chan int, len(req.Queries))
+			for qi := range req.Queries {
+				queue <- qi
+			}
+			close(queue)
+			for lane := 0; lane < testCallsPerProvider; lane++ {
+				lanes.Add(1)
+				go func(run *testProviderRun, queue <-chan int) {
+					defer lanes.Done()
+					for qi := range queue {
+						query := req.Queries[qi].Query
+						resp, model, err, skipped := run.ask(r.Context(), query, 4096)
+						run.record(err)
+						respMu.Lock()
+						completedCalls++
+						n := completedCalls
+						responses = append(responses, testRawResponse{
+							providerID:   run.provider.ProviderID(),
+							providerName: run.provider.Name(),
+							model:        model.Name,
+							queryIdx:     qi,
+							response:     resp,
+							err:          err,
+						})
+						respMu.Unlock()
+						if skipped {
+							continue
+						}
+						outcome := ""
+						if err != nil {
+							outcome = " — no answer"
+						}
+						notify(fmt.Sprintf("[%d/%d] %s (%s): \"%s\"%s", n, totalCalls, run.provider.Name(), model.Name, truncateStr(query, 60), outcome))
+					}
+				}(run, queue)
+			}
 		}
-		_ = g.Wait()
+		lanes.Wait()
 		if r.Context().Err() != nil {
 			return // client went away or the budget ran out
 		}

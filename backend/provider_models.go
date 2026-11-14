@@ -204,12 +204,33 @@ func providerFailureReason(err error) string {
 	if err == nil {
 		return "it returned no answers"
 	}
+	if isTimeoutError(err) {
+		return "its models didn't answer in time (" + truncateStr(err.Error(), 200) + ")"
+	}
 	return "its API returned errors: " + truncateStr(err.Error(), 200)
 }
 
 // providerRetryDelays are the waits between attempts when a provider is
 // rate-limited or overloaded. A variable so tests can shorten it.
 var providerRetryDelays = []time.Duration{3 * time.Second, 8 * time.Second}
+
+// retryWait is how long to wait before retry number attempt+1 of a call that
+// failed with a retryable error: the provider's own hint when it gave a longer
+// one (capped at maxQuotaRetryWait), else the default backoff.
+func retryWait(attempt int, err error) time.Duration {
+	if attempt >= len(providerRetryDelays) {
+		attempt = len(providerRetryDelays) - 1
+	}
+	wait := providerRetryDelays[attempt]
+	var qe *QuotaError
+	if errors.As(err, &qe) && qe.RetryAfter > wait {
+		wait = qe.RetryAfter
+		if wait > maxQuotaRetryWait {
+			wait = maxQuotaRetryWait
+		}
+	}
+	return wait
+}
 
 // callWithRetry calls the provider, retrying rate-limit and overload failures.
 func callWithRetry(ctx context.Context, p LLMProvider, apiKey, model, prompt string, maxTokens int) (string, error) {
@@ -218,14 +239,7 @@ func callWithRetry(ctx context.Context, p LLMProvider, apiKey, model, prompt str
 		if err == nil || classifyProviderError(err) != failRetry || attempt >= len(providerRetryDelays) {
 			return resp, err
 		}
-		wait := providerRetryDelays[attempt]
-		var qe *QuotaError
-		if errors.As(err, &qe) && qe.RetryAfter > wait {
-			wait = qe.RetryAfter
-			if wait > maxQuotaRetryWait {
-				wait = maxQuotaRetryWait
-			}
-		}
+		wait := retryWait(attempt, err)
 		select {
 		case <-ctx.Done():
 			return "", err
@@ -324,29 +338,22 @@ func findModel(models []ModelDef, id string) (ModelDef, bool) {
 // test stands in for someone asking there. For OpenAI that is the chat-latest
 // alias, which OpenAI points at the model ChatGPT's Chat tab answers with; the
 // frontier models at the top of the API list (GPT-6.1 Terra, for one) aren't
-// served there. The Gemini app answers with a Flash model, so Gemini uses the
-// newest stable Flash (Pro models also often have no free-tier quota). Other
-// providers use their best model. note says why, for the model picker.
+// served there. Gemini uses Gemini 4 Hydrogen, the model the free Gemini app
+// answers with, or for keys that don't list it the newest stable Flash (the
+// larger models often have no free-tier quota). Other providers use their best
+// model. note says why, for the model picker.
 func testDefaultModel(providerID string, models []ModelDef) (id, note string) {
 	if len(models) == 0 {
 		return "", ""
 	}
 	if providerID == "gemini" {
-		var preview string
-		for _, m := range models { // ranked newest first
-			lid := strings.ToLower(m.ID)
-			if !strings.Contains(lid, "flash") || strings.Contains(lid, "lite") {
-				continue
-			}
-			if !strings.Contains(lid, "preview") {
-				return m.ID, "closest to the Gemini app"
-			}
-			if preview == "" {
-				preview = m.ID
-			}
+		// Gemini 4 Hydrogen is what the Gemini app answers free users with, and
+		// the only Gemini 4 model on the API's free tier (Argon and Carbon are paid).
+		if id := firstGeminiFamily(models, "hydrogen"); id != "" {
+			return id, "what the free Gemini app uses"
 		}
-		if preview != "" {
-			return preview, "closest to the Gemini app"
+		if id := firstGeminiFamily(models, "flash"); id != "" {
+			return id, "closest to the Gemini app"
 		}
 	}
 	if providerID == "openai" {
@@ -360,6 +367,25 @@ func testDefaultModel(providerID string, models []ModelDef) (id, note string) {
 		}
 	}
 	return models[0].ID, "best available"
+}
+
+// firstGeminiFamily returns the newest listed model of a Gemini family (e.g.
+// "hydrogen"), preferring a stable model to a preview and skipping lite ones.
+func firstGeminiFamily(models []ModelDef, family string) string {
+	var preview string
+	for _, m := range models { // ranked newest first
+		lid := strings.ToLower(m.ID)
+		if !strings.Contains(lid, family) || strings.Contains(lid, "lite") {
+			continue
+		}
+		if !strings.Contains(lid, "preview") {
+			return m.ID
+		}
+		if preview == "" {
+			preview = m.ID
+		}
+	}
+	return preview
 }
 
 // openaiChatGPTAlias is OpenAI's API alias for ChatGPT's current chat model.
