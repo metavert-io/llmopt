@@ -26,20 +26,20 @@ If you deploy with bare `fly deploy` (uses `Dockerfile` + `fly.toml`), only the 
 
 1. **If lastsaas submodule changed**: push lastsaas to GitHub first, then pull into the submodule:
    ```bash
-   cd /Users/jonradoff/lastsaas && git push origin master
-   cd /Users/jonradoff/llmopt/lastsaas && git pull origin master
+   cd <your LastSaaS checkout> && git push origin master
+   cd <llmopt checkout>/lastsaas && git pull origin master   # or: ./scripts/setup-saas.sh
    ```
    The Docker build reads from the submodule directory, which tracks GitHub — not the local lastsaas working copy.
 
 2. **Build check**:
    ```bash
-   cd /Users/jonradoff/llmopt/backend && go build ./...
-   cd /Users/jonradoff/llmopt/frontend && npx tsc --noEmit
+   cd backend && go build ./...
+   cd ../frontend && npx tsc --noEmit
    ```
 
 3. **Deploy**:
    ```bash
-   cd /Users/jonradoff/llmopt && fly deploy -c fly.saas.toml
+   fly deploy -c fly.saas.toml   # from the repo root
    ```
 
 ## Post-Deploy Verification

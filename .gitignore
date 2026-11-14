@@ -12,3 +12,6 @@ frontend/dist/
 lastsaas/
 .frontend-build/
 frontend-dist/
+
+# Local agent tooling (worktrees, settings)
+.claude/
