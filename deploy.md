@@ -48,6 +48,10 @@ If you deploy with bare `fly deploy` (uses `Dockerfile` + `fly.toml`), only the 
 - Visit https://llmopt.fly.dev/login — SaaS login page loads with OAuth buttons (Google)
 - Check `fly logs -a llmopt` — should see startup lines from both llmopt and lastsaas backends
 
+## Idle Shutdown (instead of Fly auto-stop)
+
+`fly.saas.toml` sets `auto_stop_machines = "off"`; the app stops itself instead (`backend/idle.go`). It stays up for `LLMOPT_IDLE_SHUTDOWN` (60m) after the last signed-in request, or `LLMOPT_IDLE_SHUTDOWN_VISITOR` (10m) after anonymous visits and boot, never during a request, and ignores `/api/health*` polls. Then it sends SIGTERM to its parent supervisord, which exits 0, and the machine stops; the `[[restart]] policy = "on-failure"` keeps it stopped until the proxy starts it on the next request. Look for "Idle shutdown enabled" at startup and "Idle shutdown: ... stopping the machine" when it stops. To go back to Fly's auto-stop, set `auto_stop_machines = "stop"` and remove `LLMOPT_IDLE_SHUTDOWN`.
+
 ## Common Issues
 
 | Symptom | Cause | Fix |

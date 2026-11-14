@@ -499,7 +499,7 @@ func main() {
 	}
 
 	log.Printf("LLM Optimizer backend starting on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, withCORS(mux)))
+	log.Fatal(http.ListenAndServe(":"+port, startIdleShutdown(withCORS(mux))))
 }
 
 func withCORS(next http.Handler) http.Handler {

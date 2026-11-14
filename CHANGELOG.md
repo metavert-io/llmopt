@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-11-14
+
+- **Hosting**: the machine now decides when to stop instead of Fly's proxy, which stopped it after a few idle minutes, sometimes mid-way through someone's work. With `LLMOPT_IDLE_SHUTDOWN=60m` (set in `fly.saas.toml`), it stays up until 60 minutes pass without a signed-in request (`LLMOPT_IDLE_SHUTDOWN_VISITOR`, 10 minutes, for anonymous visits and for the boot itself), never stops while a request is in flight, and ignores the health polls open tabs send every 5 minutes. It then asks supervisord to shut down; the machine stops cleanly (restart policy `on-failure`), and Fly's proxy starts it on the next request. `auto_stop_machines` is now `off`.
+
 ## 2026-11-13
 
 - **LLM Test**: a provider that can't be used no longer stops the test. Providers without a key are skipped with a note. A provider whose key is rejected or out of credit is dropped after its first failure, and the rest of its queries are skipped. Rate-limit and overload errors are retried with backoff. A retired model makes the run switch to the provider's next model. Providers that answered nothing are listed in a new `unavailable_providers` field (shown on the results page and in the PDF) instead of counting as zero in the overall score. Per-provider rates are now computed over the queries that provider answered (`answered`/`failed`).
