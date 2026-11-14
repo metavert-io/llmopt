@@ -67,6 +67,9 @@ func (p *GeminiProvider) BuildStreamBody(model string, maxTokens int, prompt str
 }
 
 func (p *GeminiProvider) Call(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+	if isGeminiThinkingModel(model) {
+		maxTokens += reasoningHeadroom // thinking tokens share the output budget
+	}
 	body, _ := json.Marshal(map[string]any{
 		"contents": []map[string]any{
 			{
@@ -80,12 +83,14 @@ func (p *GeminiProvider) Call(ctx context.Context, apiKey, model, prompt string,
 		},
 	})
 
-	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", geminiAPIBase, model, apiKey)
+	// The key goes in a header, not the URL, so it can't leak into error text.
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", geminiAPIBase, model)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := llmHTTPClient.Do(httpReq)
 	if err != nil {
@@ -99,14 +104,15 @@ func (p *GeminiProvider) Call(ctx context.Context, apiKey, model, prompt string,
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Gemini API error (%d): %s", resp.StatusCode, string(respBody))
+		return "", &ProviderHTTPError{Provider: "Gemini", Status: resp.StatusCode, Body: string(respBody)}
 	}
 
 	var result struct {
 		Candidates []struct {
 			Content struct {
 				Parts []struct {
-					Text string `json:"text"`
+					Text    string `json:"text"`
+					Thought bool   `json:"thought"`
 				} `json:"parts"`
 			} `json:"content"`
 		} `json:"candidates"`
@@ -117,7 +123,17 @@ func (p *GeminiProvider) Call(ctx context.Context, apiKey, model, prompt string,
 	if len(result.Candidates) == 0 || len(result.Candidates[0].Content.Parts) == 0 {
 		return "", fmt.Errorf("empty response from Gemini")
 	}
-	return result.Candidates[0].Content.Parts[0].Text, nil
+	// An answer can arrive in several parts; join the visible ones.
+	var text strings.Builder
+	for _, part := range result.Candidates[0].Content.Parts {
+		if !part.Thought {
+			text.WriteString(part.Text)
+		}
+	}
+	if text.Len() == 0 {
+		return "", fmt.Errorf("empty response from Gemini")
+	}
+	return text.String(), nil
 }
 
 func (p *GeminiProvider) Stream(ctx context.Context, apiKey string, body []byte, w http.ResponseWriter, flusher http.Flusher) (*StreamResult, error) {
@@ -137,12 +153,13 @@ func (p *GeminiProvider) Stream(ctx context.Context, apiKey string, body []byte,
 	delete(bodyMap, "_model")
 	cleanBody, _ := json.Marshal(bodyMap)
 
-	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse&key=%s", geminiAPIBase, model, apiKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:streamGenerateContent?alt=sse", geminiAPIBase, model)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(cleanBody))
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := llmStreamClient.Do(httpReq)
 	if err != nil {
@@ -227,6 +244,10 @@ func (p *GeminiProvider) VerifyKey(ctx context.Context, apiKey string) (string, 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	model, status := verifyModelFor(ctx, p, apiKey)
+	if status != "" {
+		return status, nil
+	}
 	body, _ := json.Marshal(map[string]any{
 		"contents": []map[string]any{
 			{
@@ -240,12 +261,13 @@ func (p *GeminiProvider) VerifyKey(ctx context.Context, apiKey string) (string, 
 		},
 	})
 
-	url := fmt.Sprintf("%s/v1beta/models/gemini-2.5-flash:generateContent?key=%s", geminiAPIBase, apiKey)
+	url := fmt.Sprintf("%s/v1beta/models/%s:generateContent", geminiAPIBase, model)
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
 		return "error", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("x-goog-api-key", apiKey)
 
 	resp, err := llmHTTPClient.Do(httpReq)
 	if err != nil {

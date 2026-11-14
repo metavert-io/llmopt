@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
-import { apiFetch } from './apiFetch'
+import { apiFetch, apiFetchWithWake, describeHttpError } from './apiFetch'
 import { fetchCurrentUser, fetchUnreadCount, clearAuth, type UserInfo } from './auth'
 import { trackPageView, trackEvent, trackEventImmediate, setTelemetryContext } from './telemetry'
 
@@ -654,6 +654,15 @@ interface TestProviderSummary {
   recommend_rate: number
   accuracy_rate: number
   sentiment_score: number
+  answered?: number  // queries this provider answered (rates are over these)
+  failed?: number    // queries it couldn't answer
+}
+
+interface TestUnavailableProvider {
+  provider_id: string
+  provider_name: string
+  model?: string
+  reason: string
 }
 
 interface LLMTestResult {
@@ -664,6 +673,7 @@ interface LLMTestResult {
   queries: TestQuery[]
   results: TestQueryResult[]
   provider_summaries: TestProviderSummary[]
+  unavailable_providers?: TestUnavailableProvider[]
   overall_score: number
   brand_context_used: boolean
   competitor_of?: string
@@ -962,7 +972,9 @@ export default function App() {
   const [testError, setTestError] = useState('')
   const [confirmDeleteTest, setConfirmDeleteTest] = useState(false)
   const [testHistory, setTestHistory] = useState<LLMTestResult[]>([])
-  const [testProviderModels, setTestProviderModels] = useState<{ id: string; name: string; models: { id: string; name: string }[] }[]>([])
+  const [testProviderModels, setTestProviderModels] = useState<{ id: string; name: string; models: { id: string; name: string }[]; default?: string; live?: boolean }[]>([])
+  const [testRecheckingProvider, setTestRecheckingProvider] = useState<string | null>(null)
+  const [testProviderNotes, setTestProviderNotes] = useState<Record<string, string>>({})
   const [testModelSelections, setTestModelSelections] = useState<Record<string, string>>({})
   const [competitorTests, setCompetitorTests] = useState<LLMTestResult[]>([])
   const [showCompetitorOverlay, setShowCompetitorOverlay] = useState(false)
@@ -2501,7 +2513,7 @@ export default function App() {
     setTestError('')
 
     try {
-      const response = await apiFetch('/api/test', {
+      const response = await apiFetchWithWake('/api/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2512,11 +2524,11 @@ export default function App() {
           force,
         }),
         signal: controller.signal,
-      })
+      }, () => setTestMessages(prev => [...prev, 'Waking up the server — this can take up to a minute after it has been idle...']))
 
       if (!response.ok || !response.body) {
         setTestAnalyzing(false)
-        setTestError('Failed to start test')
+        setTestError(response.ok ? 'The test started but sent no progress stream. Try again.' : await describeHttpError(response, 'test'))
         return
       }
 
@@ -2571,7 +2583,35 @@ export default function App() {
       setTestAnalyzing(false)
       testAbortRef.current = null
     }
-  }, [selectedDomain, testSelectedProviders, testQueries, saasEnabled, user, apiKeyStatus])
+  }, [selectedDomain, testSelectedProviders, testQueries, testModelSelections, saasEnabled, user, apiKeyStatus])
+
+  // Re-check a provider key from the test page (e.g. after a provider retired the
+  // model the last check used). An active key becomes selectable right away.
+  const recheckTestProvider = useCallback(async (provider: string) => {
+    setTestRecheckingProvider(provider)
+    setTestProviderNotes(prev => ({ ...prev, [provider]: '' }))
+    try {
+      const r = await apiFetch(`/api/settings/api-keys/${encodeURIComponent(provider)}/verify`, { method: 'POST' })
+      if (!r.ok) {
+        const note = r.status === 403 ? 'Only the team owner can re-check keys.' : await describeHttpError(r, 'key check')
+        setTestProviderNotes(prev => ({ ...prev, [provider]: note }))
+        return
+      }
+      const data = await r.json()
+      const status: string = data?.status || 'error'
+      setTestAvailableProviders(prev => prev.map(k => k.provider === provider ? { ...k, status } : k))
+      if (status === 'active') {
+        setTestSelectedProviders(prev => prev.includes(provider) ? prev : [...prev, provider])
+        apiFetch('/api/providers/models').then(res => res.ok ? res.json() : null).then(models => {
+          if (Array.isArray(models)) setTestProviderModels(models)
+        }).catch(() => {})
+      }
+    } catch {
+      setTestProviderNotes(prev => ({ ...prev, [provider]: "Couldn't reach the server. Try again." }))
+    } finally {
+      setTestRecheckingProvider(null)
+    }
+  }, [])
 
   const stopLLMTest = useCallback(() => {
     testAbortRef.current?.abort()
@@ -2591,7 +2631,7 @@ export default function App() {
     setShowCompetitorModal(false)
 
     try {
-      const response = await apiFetch('/api/test', {
+      const response = await apiFetchWithWake('/api/test', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -2603,9 +2643,13 @@ export default function App() {
           force: false,
         }),
         signal: controller.signal,
-      })
+      }, () => setTestMessages(prev => [...prev, 'Waking up the server — this can take up to a minute after it has been idle...']))
 
-      if (!response.ok || !response.body) { setTestAnalyzing(false); setTestError('Failed to start competitor test'); return }
+      if (!response.ok || !response.body) {
+        setTestAnalyzing(false)
+        setTestError(response.ok ? 'The competitor test started but sent no progress stream. Try again.' : await describeHttpError(response, 'competitor test'))
+        return
+      }
 
       const reader = response.body.getReader()
       const decoder = new TextDecoder()
@@ -2800,9 +2844,11 @@ export default function App() {
       // Fetch available providers
       apiFetch('/api/settings/api-keys').then(r => r.ok ? r.json() : null).then(data => {
         if (data?.keys) {
-          const active = data.keys.filter((k: { status: string; provider: string }) => k.status === 'active' && k.provider !== 'youtube')
-          setTestAvailableProviders(active)
-          setTestSelectedProviders(active.map((k: { provider: string }) => k.provider))
+          // List every LLM key; ones whose last check failed are shown with a
+          // Re-check button instead of being hidden.
+          const llmKeys = data.keys.filter((k: { provider: string }) => k.provider !== 'youtube')
+          setTestAvailableProviders(llmKeys)
+          setTestSelectedProviders(llmKeys.filter((k: { status: string }) => k.status === 'active').map((k: { provider: string }) => k.provider))
         }
       }).catch(() => {})
       // Fetch provider models for model selection dropdowns
@@ -10020,6 +10066,11 @@ curl -X PATCH \\
                         {r.run_number > 0 && <span className="text-xs text-dark-500 bg-dark-800 px-2 py-0.5 rounded-full">Run #{r.run_number}</span>}
                       </div>
                       <p className="text-dark-400 text-sm">{r.provider_summaries.length} provider{r.provider_summaries.length !== 1 ? 's' : ''} tested with {r.queries.length} queries &middot; {fmtDate(r.generated_at)}</p>
+                      {r.unavailable_providers && r.unavailable_providers.length > 0 && (
+                        <p className="text-amber-400/80 text-xs mt-1">
+                          Not included: {r.unavailable_providers.map(u => `${u.provider_name} (${u.reason})`).join('; ')}. Scores cover the providers that answered.
+                        </p>
+                      )}
                     </div>
                     {/* Trend sparkline */}
                     {testHistory.length > 1 && (() => {
@@ -10153,6 +10204,9 @@ curl -X PATCH \\
                             <div className="flex justify-between"><span className="text-dark-400">Recommend Rate</span><span className="text-white font-medium">{ps.recommend_rate}%</span></div>
                             <div className="flex justify-between"><span className="text-dark-400">Accuracy</span><span className="text-white font-medium">{ps.accuracy_rate}%</span></div>
                             <div className="flex justify-between"><span className="text-dark-400">Sentiment</span><span className="text-white font-medium">{ps.sentiment_score}/100</span></div>
+                            {!!ps.failed && ps.failed > 0 && (
+                              <div className="flex justify-between"><span className="text-dark-400">Answered</span><span className="text-amber-400/80 font-medium">{ps.answered ?? 0} of {(ps.answered ?? 0) + ps.failed} queries</span></div>
+                            )}
                           </div>
                           {compScores.length > 0 && (
                             <div className="mt-3 pt-3 border-t border-dark-700 space-y-1.5">
@@ -10283,6 +10337,28 @@ curl -X PATCH \\
                         const providerNames: Record<string, string> = { anthropic: 'Anthropic', openai: 'OpenAI', grok: 'Grok (xAI)', gemini: 'Gemini' }
                         const checked = testSelectedProviders.includes(p.provider)
                         const providerModelDefs = testProviderModels.find(pm => pm.id === p.provider)
+                        const bestModel = providerModelDefs?.default || providerModelDefs?.models[0]?.id
+                        if (p.status !== 'active') {
+                          const statusLabels: Record<string, string> = { invalid: 'Key was rejected', no_credits: 'Out of credits', error: 'Last key check failed' }
+                          const rechecking = testRecheckingProvider === p.provider
+                          return (
+                            <div key={p.provider} className="p-3 rounded-lg border bg-dark-900/30 border-dark-700">
+                              <div className="flex items-center justify-between gap-2">
+                                <div className="flex items-center gap-2 min-w-0">
+                                  <input type="checkbox" disabled checked={false} className="accent-primary-500 opacity-40" />
+                                  <span className="text-dark-400 text-sm font-medium">{providerNames[p.provider] || p.provider}</span>
+                                  <span className="text-amber-400/80 text-xs truncate">{statusLabels[p.status] || p.status}</span>
+                                </div>
+                                <button
+                                  onClick={() => recheckTestProvider(p.provider)}
+                                  disabled={rechecking}
+                                  className="text-xs px-2 py-1 bg-dark-700 text-dark-300 rounded hover:text-white transition-colors cursor-pointer disabled:opacity-50 disabled:cursor-wait flex-shrink-0"
+                                >{rechecking ? 'Checking…' : 'Re-check'}</button>
+                              </div>
+                              {testProviderNotes[p.provider] && <p className="text-red-400 text-xs mt-2">{testProviderNotes[p.provider]}</p>}
+                            </div>
+                          )
+                        }
                         return (
                           <div key={p.provider} className={`p-3 rounded-lg border transition-all ${
                             checked ? 'bg-primary-500/10 border-primary-500/30' : 'bg-dark-900/50 border-dark-700 hover:border-dark-600'
@@ -10299,14 +10375,15 @@ curl -X PATCH \\
                               />
                               <span className="text-white text-sm font-medium">{providerNames[p.provider] || p.provider}</span>
                             </label>
-                            {checked && providerModelDefs && providerModelDefs.models.length > 1 && (
+                            {checked && providerModelDefs && providerModelDefs.models.length > 0 && (
                               <select
-                                value={testModelSelections[p.provider] || ''}
+                                value={providerModelDefs.models.some(m => m.id === testModelSelections[p.provider]) ? testModelSelections[p.provider] : bestModel}
                                 onChange={e => setTestModelSelections(prev => ({ ...prev, [p.provider]: e.target.value }))}
+                                title={providerModelDefs.live ? 'Models this API key can use today, best first' : 'Built-in model list (the provider could not be asked)'}
                                 className="mt-2 w-full bg-dark-800 border border-dark-600 text-dark-300 text-xs rounded-md px-2 py-1.5 focus:border-primary-500/50 focus:outline-none cursor-pointer"
                               >
                                 {providerModelDefs.models.map(m => (
-                                  <option key={m.id} value={m.id}>{m.name}</option>
+                                  <option key={m.id} value={m.id}>{m.name}{m.id === bestModel ? ' (best available)' : ''}</option>
                                 ))}
                               </select>
                             )}

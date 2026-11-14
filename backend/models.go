@@ -824,6 +824,18 @@ type LLMTestSummary struct {
 	RecommendRate  int    `json:"recommend_rate" bson:"recommendRate"`
 	AccuracyRate   int    `json:"accuracy_rate" bson:"accuracyRate"`
 	SentimentScore int    `json:"sentiment_score" bson:"sentimentScore"`
+	// Answered and Failed count this provider's queries; rates are over Answered.
+	Answered int `json:"answered,omitempty" bson:"answered,omitempty"`
+	Failed   int `json:"failed,omitempty" bson:"failed,omitempty"`
+}
+
+// LLMTestUnavailable records a selected provider that couldn't answer any query,
+// so it is left out of the scores instead of counting as zero.
+type LLMTestUnavailable struct {
+	ProviderID   string `json:"provider_id" bson:"providerId"`
+	ProviderName string `json:"provider_name" bson:"providerName"`
+	Model        string `json:"model,omitempty" bson:"model,omitempty"`
+	Reason       string `json:"reason" bson:"reason"`
 }
 
 type LLMTest struct {
@@ -835,10 +847,12 @@ type LLMTest struct {
 	Queries           []LLMTestQuery       `json:"queries" bson:"queries"`
 	Results           []LLMTestQueryResult `json:"results" bson:"results"`
 	ProviderSummaries []LLMTestSummary     `json:"provider_summaries" bson:"providerSummaries"`
-	OverallScore      int                  `json:"overall_score" bson:"overallScore"`
-	BrandContextUsed  bool                 `json:"brand_context_used" bson:"brandContextUsed"`
-	CompetitorOf      string               `json:"competitor_of,omitempty" bson:"competitorOf,omitempty"`
-	GeneratedAt       time.Time            `json:"generated_at" bson:"generatedAt"`
+	// UnavailableProviders lists selected providers that couldn't answer at all.
+	UnavailableProviders []LLMTestUnavailable `json:"unavailable_providers,omitempty" bson:"unavailableProviders,omitempty"`
+	OverallScore         int                  `json:"overall_score" bson:"overallScore"`
+	BrandContextUsed     bool                 `json:"brand_context_used" bson:"brandContextUsed"`
+	CompetitorOf         string               `json:"competitor_of,omitempty" bson:"competitorOf,omitempty"`
+	GeneratedAt          time.Time            `json:"generated_at" bson:"generatedAt"`
 }
 
 // UserAccessKey is a per-user API key for accessing llmopt's MCP server.

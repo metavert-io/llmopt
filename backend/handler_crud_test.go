@@ -634,7 +634,7 @@ func TestHandleHealthHistory(t *testing.T) {
 // ── Provider Models ─────────────────────────────────────────────────────
 
 func TestHandleListProviderModels(t *testing.T) {
-	handler := handleListProviderModels()
+	handler := handleListProviderModels(nil, nil, "", false)
 
 	req := testRequestNoAuth(t, "GET", "/api/providers/models", nil)
 	w := httptest.NewRecorder()

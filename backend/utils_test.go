@@ -452,7 +452,7 @@ func TestHandleAPIv1Docs(t *testing.T) {
 func TestHandleListProviderModels_Empty(t *testing.T) {
 	withTestProviders(t) // empty providers
 
-	handler := handleListProviderModels()
+	handler := handleListProviderModels(nil, nil, "", false)
 	req := httptest.NewRequest("GET", "/api/models", nil)
 	w := httptest.NewRecorder()
 	handler(w, req)

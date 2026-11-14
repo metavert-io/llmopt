@@ -54,6 +54,9 @@ func (p *GrokProvider) BuildStreamBody(model string, maxTokens int, prompt strin
 }
 
 func (p *GrokProvider) Call(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+	if isGrokReasoningModel(model) {
+		maxTokens += reasoningHeadroom // reasoning tokens share the output budget
+	}
 	body, _ := json.Marshal(map[string]any{
 		"model":      model,
 		"max_tokens": maxTokens,
@@ -81,7 +84,7 @@ func (p *GrokProvider) Call(ctx context.Context, apiKey, model, prompt string, m
 
 	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != 200 {
-		return "", fmt.Errorf("Grok API error (%d): %s", resp.StatusCode, string(respBody))
+		return "", &ProviderHTTPError{Provider: "Grok", Status: resp.StatusCode, Body: string(respBody)}
 	}
 
 	var result struct {
@@ -195,8 +198,12 @@ func (p *GrokProvider) VerifyKey(ctx context.Context, apiKey string) (string, er
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
+	model, status := verifyModelFor(ctx, p, apiKey)
+	if status != "" {
+		return status, nil
+	}
 	body, _ := json.Marshal(map[string]any{
-		"model":      "grok-3-mini",
+		"model":      model,
 		"max_tokens": 10,
 		"messages": []map[string]any{
 			{"role": "user", "content": "Reply with just the word 'ok'."},
@@ -220,6 +227,10 @@ func (p *GrokProvider) VerifyKey(ctx context.Context, apiKey string) (string, er
 	case resp.StatusCode == 200:
 		return "active", nil
 	case resp.StatusCode == 401 || resp.StatusCode == 403:
+		errBody, _ := io.ReadAll(resp.Body)
+		if isBillingMessage(strings.ToLower(string(errBody))) || strings.Contains(strings.ToLower(string(errBody)), "credits") {
+			return "no_credits", nil
+		}
 		return "invalid", nil
 	case resp.StatusCode == 429:
 		errBody, _ := io.ReadAll(resp.Body)
