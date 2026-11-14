@@ -36,7 +36,7 @@ func (p *AnthropicProvider) SmallModel() string {
 func (p *AnthropicProvider) BuildStreamBody(model string, maxTokens int, prompt string, useWebSearch bool) ([]byte, error) {
 	body := map[string]any{
 		"model":      model,
-		"max_tokens": maxTokens,
+		"max_tokens": anthropicOutputBudget(model, maxTokens),
 		"stream":     true,
 		"messages": []map[string]any{
 			{"role": "user", "content": prompt},
@@ -54,9 +54,10 @@ func (p *AnthropicProvider) BuildStreamBody(model string, maxTokens int, prompt 
 }
 
 func (p *AnthropicProvider) Call(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+	budget := anthropicOutputBudget(model, maxTokens)
 	body, _ := json.Marshal(map[string]any{
 		"model":      model,
-		"max_tokens": maxTokens,
+		"max_tokens": budget,
 		"messages": []map[string]any{
 			{"role": "user", "content": prompt},
 		},
@@ -92,18 +93,48 @@ func (p *AnthropicProvider) Call(ctx context.Context, apiKey, model, prompt stri
 		return "", &ProviderHTTPError{Provider: "Claude", Status: resp.StatusCode, Body: string(respBody)}
 	}
 
+	return parseAnthropicMessage(respBody, budget)
+}
+
+// parseAnthropicMessage returns the answer text of a Messages API response.
+// Thinking models put thinking blocks (with empty text by default) ahead of the
+// answer, and citations split an answer into several text blocks, so every
+// text block is joined rather than reading the first block.
+func parseAnthropicMessage(respBody []byte, budget int) (string, error) {
 	var result struct {
 		Content []struct {
+			Type string `json:"type"`
 			Text string `json:"text"`
 		} `json:"content"`
+		StopReason  string `json:"stop_reason"`
+		StopDetails *struct {
+			Category string `json:"category"`
+		} `json:"stop_details"`
 	}
 	if err := json.Unmarshal(respBody, &result); err != nil {
 		return "", fmt.Errorf("failed to parse response: %w", err)
 	}
-	if len(result.Content) == 0 {
-		return "", fmt.Errorf("empty response from Claude")
+	var text strings.Builder
+	for _, block := range result.Content {
+		if block.Type == "text" {
+			text.WriteString(block.Text)
+		}
 	}
-	return result.Content[0].Text, nil
+	if result.StopReason == "refusal" {
+		category := ""
+		if result.StopDetails != nil && result.StopDetails.Category != "" {
+			category = " (" + result.StopDetails.Category + ")"
+		}
+		return "", fmt.Errorf("Claude declined to answer%s", category)
+	}
+	answer := strings.TrimSpace(text.String())
+	if answer == "" {
+		if result.StopReason == "max_tokens" {
+			return "", fmt.Errorf("Claude used its whole %d-token output budget before writing an answer", budget)
+		}
+		return "", fmt.Errorf("empty response from Claude (stop reason %q)", result.StopReason)
+	}
+	return answer, nil
 }
 
 func (p *AnthropicProvider) Stream(ctx context.Context, apiKey string, body []byte, w http.ResponseWriter, flusher http.Flusher) (*StreamResult, error) {

@@ -855,6 +855,16 @@ type LLMTest struct {
 	GeneratedAt          time.Time            `json:"generated_at" bson:"generatedAt"`
 }
 
+// TestQuerySet is the LLM Test query list saved for a domain, so a tenant's
+// questions survive leaving the page and carry over from run to run.
+// One per tenant and domain.
+type TestQuerySet struct {
+	TenantID  string         `json:"-" bson:"tenantId,omitempty"`
+	Domain    string         `json:"domain" bson:"domain"`
+	Queries   []LLMTestQuery `json:"queries" bson:"queries"`
+	UpdatedAt time.Time      `json:"updated_at" bson:"updatedAt"`
+}
+
 // UserAccessKey is a per-user API key for accessing llmopt's MCP server.
 // Keys use the "lok_" prefix and are stored as SHA-256 hashes — the raw key
 // is returned only once at creation time.

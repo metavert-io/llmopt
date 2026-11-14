@@ -237,6 +237,33 @@ func findModel(models []ModelDef, id string) (ModelDef, bool) {
 	return ModelDef{}, false
 }
 
+// testDefaultModel picks the model an LLM Test uses when none is chosen: the
+// one an ordinary user of the provider's chat app most likely gets, since the
+// test stands in for someone asking there. For OpenAI that is the chat-latest
+// alias, which OpenAI points at the model ChatGPT's Chat tab answers with; the
+// frontier models at the top of the API list (GPT-6.1 Terra, for one) aren't
+// served there. Other providers use their best model. note says why, for the
+// model picker.
+func testDefaultModel(providerID string, models []ModelDef) (id, note string) {
+	if len(models) == 0 {
+		return "", ""
+	}
+	if providerID == "openai" {
+		if _, ok := findModel(models, openaiChatGPTAlias); ok {
+			return openaiChatGPTAlias, "what ChatGPT uses"
+		}
+		for _, m := range models { // ranked newest first
+			if strings.HasSuffix(strings.ToLower(m.ID), "-chat-latest") {
+				return m.ID, "closest to ChatGPT"
+			}
+		}
+	}
+	return models[0].ID, "best available"
+}
+
+// openaiChatGPTAlias is OpenAI's API alias for ChatGPT's current chat model.
+const openaiChatGPTAlias = "chat-latest"
+
 // pickEvalModel chooses the model for an evaluation pass: the tenant's preferred
 // model if the key can use it, else the provider's usual default if it is still
 // offered, else the best model the key can use.
@@ -544,6 +571,16 @@ func (p *OpenAIProvider) ListModels(ctx context.Context, apiKey string) ([]Model
 	var ranked []rankedModel
 	for _, m := range body.Data {
 		id := strings.ToLower(m.ID)
+		if id == openaiChatGPTAlias {
+			// No version of its own; it is picked by name (testDefaultModel), so
+			// it ranks last rather than displacing the best model.
+			ranked = append(ranked, rankedModel{
+				def:     ModelDef{ID: m.ID, Name: "ChatGPT (chat-latest)"},
+				tier:    modelTier("openai", id),
+				created: m.Created,
+			})
+			continue
+		}
 		if !openaiVersionRe.MatchString(id) && !oSeriesRe.MatchString(id) {
 			continue
 		}
@@ -682,6 +719,31 @@ func isOpenAIReasoningModel(model string) bool {
 		return false
 	}
 	return oSeriesRe.MatchString(m) || strings.HasPrefix(m, "gpt-5")
+}
+
+// isAnthropicThinkingModel reports whether a Claude model thinks when the
+// request leaves thinking unset: the Claude 5 generation (Opus, Sonnet, Haiku)
+// and the Fable and Mythos lines. Claude Opus 5.5 can't turn thinking off at all.
+// Their thinking shares max_tokens with the answer and comes back as thinking
+// blocks ahead of the text.
+func isAnthropicThinkingModel(model string) bool {
+	m := strings.ToLower(model)
+	if strings.HasPrefix(m, "claude-fable") || strings.HasPrefix(m, "claude-mythos") {
+		return true
+	}
+	for _, family := range []string{"claude-opus-", "claude-sonnet-", "claude-haiku-"} {
+		if strings.HasPrefix(m, family) {
+			return versionAfter(m, family) >= 5
+		}
+	}
+	return false
+}
+
+func anthropicOutputBudget(model string, maxTokens int) int {
+	if isAnthropicThinkingModel(model) {
+		return maxTokens + reasoningHeadroom
+	}
+	return maxTokens
 }
 
 func isGeminiThinkingModel(model string) bool {
