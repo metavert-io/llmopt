@@ -106,6 +106,7 @@ type RedditThread struct {
 	CreatedUTC   time.Time `json:"created_utc"`
 	TopComments  []RedditComment `json:"top_comments,omitempty"`
 	IsSelfPost   bool      `json:"is_self_post"`
+	Source       string    `json:"source,omitempty"` // redditWebSearchSource when found through web search
 }
 
 // RedditComment represents a parsed Reddit comment.

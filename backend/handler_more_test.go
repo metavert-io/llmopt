@@ -386,7 +386,7 @@ func TestHandleVideoSearchTerms_Add(t *testing.T) {
 func TestHandleRedditDiscover_NoSearchTerms(t *testing.T) {
 	db := testMongoDB(t)
 
-	handler := handleRedditDiscover(db)
+	handler := handleRedditDiscover(db, testEncKey(), "fallback-key", false)
 	req := testRequest(t, "POST", "/api/reddit/discover", map[string]any{
 		"domain":       "example.com",
 		"search_terms": []string{},
@@ -413,7 +413,7 @@ func TestHandleRedditDiscover_WithTerms(t *testing.T) {
 	defer redditServer.Close()
 	withTestRedditBase(t, redditServer)
 
-	handler := handleRedditDiscover(db)
+	handler := handleRedditDiscover(db, testEncKey(), "fallback-key", false)
 	req := testRequest(t, "POST", "/api/reddit/discover", map[string]any{
 		"domain":       "example.com",
 		"brand_name":   "Example",

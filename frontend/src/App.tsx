@@ -558,6 +558,7 @@ interface RedditThreadSummary {
   created_utc: string
   is_self_post: boolean
   comment_count?: number
+  source?: string // 'web_search': found through web search, no upvotes or comment counts
 }
 
 interface RedditAnalysis {
@@ -9313,7 +9314,7 @@ curl -X PATCH \\
                           <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
                               <span className="text-xs px-1.5 py-0.5 bg-orange-500/15 text-orange-300 border border-orange-500/20 rounded">r/{t.subreddit}</span>
-                              <span className="text-dark-500 text-xs">{t.score} pts · {t.num_comments} comments</span>
+                              <span className="text-dark-500 text-xs">{t.source === 'web_search' ? 'via web search' : `${t.score} pts · ${t.num_comments} comments`}</span>
                               <span className="text-dark-600 text-xs">· {fmtDate(t.created_utc)}</span>
                             </div>
                             <p className="text-white text-sm">{t.title}</p>
@@ -9648,7 +9649,7 @@ curl -X PATCH \\
                                 : 'bg-dark-700 text-dark-400'
                               }`}>{m.sentiment}</span>
                               {m.is_recommendation && <span className="text-xs px-1.5 py-0.5 bg-primary-500/15 text-primary-300 rounded">Recommends</span>}
-                              <span className="text-dark-500 text-xs">{m.score} pts</span>
+                              {m.score > 0 && <span className="text-dark-500 text-xs">{m.score} pts</span>}
                             </div>
                             <p className="text-white text-sm mb-1">{m.title}</p>
                             {m.context && <p className="text-dark-400 text-xs italic">&ldquo;{m.context}&rdquo;</p>}

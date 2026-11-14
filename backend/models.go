@@ -557,6 +557,7 @@ type RedditThreadSummary struct {
 	CreatedUTC  time.Time `json:"created_utc" bson:"createdUtc"`
 	IsSelfPost  bool      `json:"is_self_post" bson:"isSelfPost"`
 	CommentCount int      `json:"comment_count" bson:"commentCount"` // top comments fetched
+	Source       string   `json:"source,omitempty" bson:"source,omitempty"` // "web_search": found through web search
 }
 
 // Reddit pillar types for the 4-pillar report
