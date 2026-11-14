@@ -113,19 +113,32 @@ func main() {
 	defer mongoDB.Close(context.Background())
 	log.Printf("Connected to MongoDB (database: %s)", dbName)
 
-	// One-time migrations
-	mongoDB.migrateDomains()   // normalize domain fields (strip protocol)
-	mongoDB.migrateIndexes()   // drop old {domain:1} unique indexes for multi-tenant
-	seedEventDefinitions(mongoDB)
+	// Local account mode (local_account.go): act as one account of the hosted
+	// service's database, without LastSaaS. It is tenant-scoped like SaaS mode.
+	localUserID, localTenantID, localMode, err := localAccountFromEnv()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// One-time migrations (the hosted service runs them, not a local copy)
+	if !localMode {
+		mongoDB.migrateDomains() // normalize domain fields (strip protocol)
+		mongoDB.migrateIndexes() // drop old {domain:1} unique indexes for multi-tenant
+		seedEventDefinitions(mongoDB)
+	}
 	if ytKey != "" {
 		log.Println("YouTube API key configured — Video Authority enabled (system key)")
 	}
 
 	// SaaS mode: multi-tenant auth via shared JWT with LastSaaS
-	saasEnabled := os.Getenv("LLMOPT_SAAS_ENABLED") == "true"
+	saasEnabled := os.Getenv("LLMOPT_SAAS_ENABLED") == "true" || localMode
 	var sm *saas.Middleware
+	var local *localAccount
 	if saasEnabled {
 		jwtSecret := os.Getenv("LLMOPT_JWT_ACCESS_SECRET")
+		if jwtSecret == "" && localMode {
+			jwtSecret = randomSecret() // no LastSaaS here to issue tokens
+		}
 		if jwtSecret == "" {
 			log.Fatal("LLMOPT_JWT_ACCESS_SECRET is required when LLMOPT_SAAS_ENABLED=true")
 		}
@@ -134,13 +147,29 @@ func main() {
 		}
 		jv := saas.NewJWTValidator(jwtSecret)
 		sm = saas.NewMiddleware(jv, mongoDB.Database)
-		log.Println("SaaS mode enabled — JWT auth active")
 
-		// One-time migration: assign root tenant to existing data
-		mongoDB.migrateTenantIDs()
+		if localMode {
+			local = &localAccount{userID: localUserID, tenantID: localTenantID, sm: sm}
+			checkCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			info, err := local.check(checkCtx)
+			cancel()
+			if err != nil {
+				log.Fatalf("Local account mode: %v (LLMOPT_LOCAL_USER_ID / LLMOPT_LOCAL_TENANT_ID)", err)
+			}
+			tenantName := ""
+			if info.Tenant != nil {
+				tenantName = info.Tenant.Name
+			}
+			log.Printf("Local account mode: every request acts as %s in %q; no migrations or background jobs", info.Email, tenantName)
+		} else {
+			log.Println("SaaS mode enabled — JWT auth active")
 
-		// One-time migration: convert per-record public flags to domain shares
-		mongoDB.migratePublicToDomainShares()
+			// One-time migration: assign root tenant to existing data
+			mongoDB.migrateTenantIDs()
+
+			// One-time migration: convert per-record public flags to domain shares
+			mongoDB.migratePublicToDomainShares()
+		}
 	}
 
 	// Distributed rate limiter (MongoDB-backed with in-memory fallback)
@@ -148,18 +177,24 @@ func main() {
 	defer rl.Stop()
 	log.Println("Rate limiter initialized")
 
-	// Capture missing screenshots for popular brands (non-blocking)
-	go ensurePopularScreenshots(mongoDB)
+	if !localMode {
+		// Capture missing screenshots for popular brands (non-blocking)
+		go ensurePopularScreenshots(mongoDB)
 
-	// Background cleanup: prune old data every 6 hours
-	go runCleanupJobs(mongoDB)
+		// Background cleanup: prune old data every 6 hours
+		go runCleanupJobs(mongoDB)
 
-	// Global health checks: probe all LLM providers every 5 minutes for the timeline
-	go runGlobalHealthChecks(mongoDB, apiKey, encryptionKey)
+		// Global health checks: probe all LLM providers every 5 minutes for the timeline
+		go runGlobalHealthChecks(mongoDB, apiKey, encryptionKey)
+	}
 
 	// withAuth wraps a handler with JWT + tenant middleware (SaaS mode only).
-	// In non-SaaS mode, returns the handler unwrapped.
+	// In local account mode it acts as that account; in non-SaaS mode it
+	// returns the handler unwrapped.
 	withAuth := func(h http.HandlerFunc) http.HandlerFunc {
+		if local != nil {
+			return local.wrap(h)
+		}
 		if sm == nil {
 			return h
 		}
@@ -182,7 +217,8 @@ func main() {
 	// SaaS config endpoint — tells the frontend whether auth is required
 	mux.HandleFunc("GET /api/config", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{"saas_enabled": saasEnabled})
+		// A local account copy has no LastSaaS sign-in; the UI runs as single-user.
+		json.NewEncoder(w).Encode(map[string]any{"saas_enabled": saasEnabled && !localMode, "local_account": localMode})
 	})
 	mux.HandleFunc("OPTIONS /api/config", handleOptions)
 
@@ -282,6 +318,9 @@ func main() {
 
 	// ─── Public API v1 ────────────────────────────────────────────────────
 	withAPIAuth := func(h http.HandlerFunc) http.HandlerFunc {
+		if local != nil {
+			return local.wrap(h)
+		}
 		if sm == nil {
 			return h
 		}
@@ -501,8 +540,12 @@ func main() {
 		port = "8080"
 	}
 
-	log.Printf("LLM Optimizer backend starting on :%s", port)
-	log.Fatal(http.ListenAndServe(":"+port, startIdleShutdown(withCORS(mux))))
+	addr, err := listenAddr(port, localMode)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Printf("LLM Optimizer backend starting on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, startIdleShutdown(withCORS(mux))))
 }
 
 func withCORS(next http.Handler) http.Handler {
