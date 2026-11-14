@@ -964,6 +964,14 @@ export default function App() {
   // LLM Test state
   const [testView, setTestView] = useState<'input' | 'results'>('input')
   const [testQueries, setTestQueries] = useState<TestQuery[]>([])
+  // The test query list is saved per domain on the server, so it is there again
+  // after leaving the page. testQueriesDomainRef is the domain whose list is
+  // loaded (null while loading); testQueriesSyncedRef is the list as last loaded
+  // or saved, so loading doesn't trigger a save.
+  const testQueriesDomainRef = useRef<string | null>(null)
+  const testQueriesSyncedRef = useRef('')
+  const testQuerySaveRef = useRef<{ timer: ReturnType<typeof setTimeout>; domain: string; body: string } | null>(null)
+  const selectedDomainRef = useRef('')
   const [testSelectedProviders, setTestSelectedProviders] = useState<string[]>([])
   const [testAvailableProviders, setTestAvailableProviders] = useState<{ provider: string; status: string; preferred_model?: string }[]>([])
   const [testResults, setTestResults] = useState<LLMTestResult | null>(null)
@@ -972,7 +980,7 @@ export default function App() {
   const [testError, setTestError] = useState('')
   const [confirmDeleteTest, setConfirmDeleteTest] = useState(false)
   const [testHistory, setTestHistory] = useState<LLMTestResult[]>([])
-  const [testProviderModels, setTestProviderModels] = useState<{ id: string; name: string; models: { id: string; name: string }[]; default?: string; live?: boolean }[]>([])
+  const [testProviderModels, setTestProviderModels] = useState<{ id: string; name: string; models: { id: string; name: string }[]; default?: string; default_note?: string; live?: boolean }[]>([])
   const [testRecheckingProvider, setTestRecheckingProvider] = useState<string | null>(null)
   const [testProviderNotes, setTestProviderNotes] = useState<Record<string, string>>({})
   const [testModelSelections, setTestModelSelections] = useState<Record<string, string>>({})
@@ -2837,10 +2845,101 @@ export default function App() {
     }
   }, [activeTab, selectedDomain, fetchSearchAnalysisList, loadSearchAnalysis])
 
+  selectedDomainRef.current = selectedDomain
+
+  const sendTestQuerySave = (domain: string, body: string, keepalive = false) => {
+    apiFetch(`/api/test/${encodeURIComponent(domain)}/queries`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      keepalive,
+    }).catch(() => {})
+  }
+  // Sends a pending save now (leaving the page or switching domain).
+  const flushTestQuerySave = () => {
+    const pending = testQuerySaveRef.current
+    if (!pending) return
+    clearTimeout(pending.timer)
+    testQuerySaveRef.current = null
+    testQueriesSyncedRef.current = pending.body
+    sendTestQuerySave(pending.domain, pending.body, true)
+  }
+
+  // Re-running starts from exactly the queries of the results on screen; that
+  // list then becomes the domain's saved list.
+  const rerunFromResults = () => {
+    const shown = testResults?.queries
+    if (selectedDomain && Array.isArray(shown) && shown.length > 0) {
+      testQueriesDomainRef.current = selectedDomain // a saved-list load still in flight won't replace it
+      setTestQueries(shown.map(q => ({ query: q.query, type: q.type, priority: q.priority })))
+    }
+    setTestView('input')
+    setTestResults(null)
+  }
+
+  // Save the query list shortly after each edit.
+  useEffect(() => {
+    const domain = testQueriesDomainRef.current
+    if (sharedModeRef.current || !domain || domain !== selectedDomain) return
+    const body = JSON.stringify({ queries: testQueries })
+    const pending = testQuerySaveRef.current
+    if (pending) {
+      if (pending.domain !== domain) {
+        flushTestQuerySave()
+      } else {
+        clearTimeout(pending.timer)
+        testQuerySaveRef.current = null
+      }
+    }
+    if (body === testQueriesSyncedRef.current) return
+    const timer = setTimeout(() => {
+      if (testQuerySaveRef.current?.timer === timer) testQuerySaveRef.current = null
+      testQueriesSyncedRef.current = body
+      sendTestQuerySave(domain, body)
+    }, 800)
+    testQuerySaveRef.current = { timer, domain, body }
+  }, [testQueries, selectedDomain])
+
+  useEffect(() => {
+    const onHide = () => flushTestQuerySave()
+    const onVisibility = () => { if (document.visibilityState === 'hidden') flushTestQuerySave() }
+    window.addEventListener('pagehide', onHide)
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      window.removeEventListener('pagehide', onHide)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, [])
+
   // Auto-load test results when switching to test tab
   useEffect(() => {
     if (sharedModeRef.current) return
     if (activeTab === 'test' && selectedDomain) {
+      // Load this domain's saved queries (or its last test's); suggest some
+      // only when it has never had any.
+      if (testQueriesDomainRef.current !== selectedDomain) {
+        const domain = selectedDomain
+        flushTestQuerySave()
+        testQueriesDomainRef.current = null
+        setTestQueries([])
+        apiFetch(`/api/test/${encodeURIComponent(domain)}/queries`).then(r => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))).then(async saved => {
+          let qs: TestQuery[] = Array.isArray(saved?.queries) ? saved.queries : []
+          if (qs.length === 0 && saved?.source === 'none') {
+            const r = await apiFetch('/api/test/generate-queries', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ domain }),
+            })
+            const qData = r.ok ? await r.json() : null
+            if (Array.isArray(qData?.queries)) qs = qData.queries
+          }
+          // Skip if the domain changed, or Re-run already filled the list.
+          if (selectedDomainRef.current !== domain || testQueriesDomainRef.current === domain) return
+          testQueriesSyncedRef.current = JSON.stringify({ queries: qs })
+          testQueriesDomainRef.current = domain
+          setTestQueries(qs)
+        }).catch(() => {})
+      }
       // Fetch available providers
       apiFetch('/api/settings/api-keys').then(r => r.ok ? r.json() : null).then(data => {
         if (data?.keys) {
@@ -2874,14 +2973,6 @@ export default function App() {
         } else {
           setTestView('input')
           setTestHistory([])
-          // Generate suggested queries
-          apiFetch('/api/test/generate-queries', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ domain: selectedDomain }),
-          }).then(r => r.ok ? r.json() : null).then(qData => {
-            if (qData?.queries) setTestQueries(qData.queries)
-          }).catch(() => {})
         }
       }).catch(() => { setTestView('input') })
     }
@@ -10028,7 +10119,7 @@ curl -X PATCH \\
                   <div className="flex items-center justify-between">
                     {!readOnly ? (
                       <button
-                        onClick={() => { setTestView('input'); setTestResults(null) }}
+                        onClick={rerunFromResults}
                         className="text-dark-400 hover:text-white transition-colors cursor-pointer text-sm flex items-center gap-1"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
@@ -10049,7 +10140,7 @@ curl -X PATCH \\
                         <>
                           <button onClick={() => setShowCompetitorModal(true)} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-amber-400 rounded-lg hover:bg-amber-900/30 hover:border-amber-800 transition-all cursor-pointer">Test Competitor</button>
                           <button onClick={() => setConfirmDeleteTest(true)} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-red-400 rounded-lg hover:bg-red-900/30 hover:border-red-800 transition-all cursor-pointer">Delete</button>
-                          <button onClick={() => { setTestView('input'); setTestResults(null) }} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-primary-400 rounded-lg hover:bg-dark-700 hover:text-primary-300 transition-all cursor-pointer">Re-run Test</button>
+                          <button onClick={rerunFromResults} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-primary-400 rounded-lg hover:bg-dark-700 hover:text-primary-300 transition-all cursor-pointer">Re-run Test</button>
                         </>
                       )}
                     </div>
@@ -10383,7 +10474,7 @@ curl -X PATCH \\
                                 className="mt-2 w-full bg-dark-800 border border-dark-600 text-dark-300 text-xs rounded-md px-2 py-1.5 focus:border-primary-500/50 focus:outline-none cursor-pointer"
                               >
                                 {providerModelDefs.models.map(m => (
-                                  <option key={m.id} value={m.id}>{m.name}{m.id === bestModel ? ' (best available)' : ''}</option>
+                                  <option key={m.id} value={m.id}>{m.name}{m.id === bestModel ? ` (${providerModelDefs?.default_note || 'best available'})` : ''}</option>
                                 ))}
                               </select>
                             )}

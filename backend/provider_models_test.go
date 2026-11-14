@@ -493,3 +493,56 @@ func TestCallWithRetry_RetriesOverload(t *testing.T) {
 		t.Errorf("a bad key must not be retried: calls=%d", calls)
 	}
 }
+
+// chat-latest (ChatGPT's current chat model) is listed, ranked last, and is
+// the LLM Test's OpenAI default rather than the top frontier model.
+func TestOpenAIListModels_ChatGPTAliasIsTestDefault(t *testing.T) {
+	ids := []string{"gpt-6.1-terra", "gpt-6-sol", "chat-latest", "gpt-6-luna", "gpt-5.1-chat-latest"}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var data []map[string]any
+		for i, id := range ids {
+			data = append(data, map[string]any{"id": id, "created": 1700000000 + i})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"data": data})
+	}))
+	defer server.Close()
+	withAllProviderBases(t, server)
+
+	got, err := (&OpenAIProvider{}).ListModels(context.Background(), "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got[0].ID != "gpt-6.1-terra" || got[len(got)-1].ID != "chat-latest" {
+		t.Fatalf("ranking: %+v", got)
+	}
+	if id, note := testDefaultModel("openai", got); id != "chat-latest" || note != "what ChatGPT uses" {
+		t.Errorf("test default = %q (%q)", id, note)
+	}
+	ordered, ok := testModelOrder("openai", got, "")
+	if !ok || ordered[0].ID != "chat-latest" || len(ordered) != len(got) {
+		t.Errorf("order = %+v", ordered)
+	}
+	// A chosen model still wins; an unknown one falls back to the default.
+	if ordered, ok = testModelOrder("openai", got, "gpt-6-sol"); !ok || ordered[0].ID != "gpt-6-sol" {
+		t.Errorf("chosen: %+v", ordered)
+	}
+	if ordered, ok = testModelOrder("openai", got, "gpt-4o"); ok || ordered[0].ID != "chat-latest" {
+		t.Errorf("unknown: ok=%v %+v", ok, ordered)
+	}
+}
+
+func TestTestDefaultModel_Fallbacks(t *testing.T) {
+	openai := []ModelDef{{ID: "gpt-6.1-terra"}, {ID: "gpt-6-chat-latest"}, {ID: "gpt-5.1-chat-latest"}}
+	if id, note := testDefaultModel("openai", openai); id != "gpt-6-chat-latest" || note != "closest to ChatGPT" {
+		t.Errorf("openai without alias = %q (%q)", id, note)
+	}
+	if id, _ := testDefaultModel("openai", []ModelDef{{ID: "gpt-6.1-terra"}}); id != "gpt-6.1-terra" {
+		t.Errorf("openai with no chat model = %q", id)
+	}
+	if id, note := testDefaultModel("anthropic", []ModelDef{{ID: "claude-opus-5-5"}, {ID: "claude-sonnet-5-5"}}); id != "claude-opus-5-5" || note != "best available" {
+		t.Errorf("anthropic = %q (%q)", id, note)
+	}
+	if id, _ := testDefaultModel("grok", nil); id != "" {
+		t.Errorf("empty list = %q", id)
+	}
+}

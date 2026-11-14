@@ -321,3 +321,47 @@ func TestLLMTest_UnknownRequestedModelUsesBest(t *testing.T) {
 		t.Errorf("used %v, want other", usedModel.Load())
 	}
 }
+
+// A provider that returns blank answers (as Claude 5 models did when only the
+// first, thinking, block was read) counts as not answering, not as "not
+// mentioned", and the run's queries are saved for the domain.
+func TestLLMTest_BlankAnswersCountAsFailures(t *testing.T) {
+	db := testMongoDB(t)
+	shortRetries(t)
+	insertTestTenantKey(t, db, "anthropic")
+	insertTestTenantKey(t, db, "openai")
+
+	const n = 3
+	good := newTestProvider()
+	good.id, good.name = "openai", "OpenAI"
+	good.CallFn = func(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+		if isEvalPrompt(prompt) {
+			return evalJSONFor(n, "openai"), nil
+		}
+		return "Example Health is a good option.", nil
+	}
+	blank := newTestProvider()
+	blank.id, blank.name = "anthropic", "Anthropic"
+	blank.CallFn = func(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+		return "  ", nil
+	}
+	withTestProviders(t, good, blank)
+
+	events, result := runLLMTestRequest(t, db, true, map[string]any{
+		"domain": "example.com", "providers": []string{"anthropic", "openai"}, "queries": testQueries(n),
+	})
+	if result == nil {
+		t.Fatalf("no result:\n%s", statusMessages(events))
+	}
+	if len(result.UnavailableProviders) != 1 || result.UnavailableProviders[0].ProviderID != "anthropic" {
+		t.Errorf("unavailable = %+v", result.UnavailableProviders)
+	}
+	if !strings.Contains(result.UnavailableProviders[0].Reason, "empty answer") {
+		t.Errorf("reason = %q", result.UnavailableProviders[0].Reason)
+	}
+
+	qs, src := getSavedQueries(t, db, "example.com")
+	if src != "saved" || len(qs) != n {
+		t.Errorf("saved queries: source %q, %d queries", src, len(qs))
+	}
+}

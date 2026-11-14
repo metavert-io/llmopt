@@ -87,6 +87,10 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 		}
 
 		resp, err = callWithRetry(ctx, pr.provider, pr.apiKey, model.ID, query, maxTokens)
+		if err == nil && strings.TrimSpace(resp) == "" {
+			// A blank answer would be scored as "brand not mentioned".
+			err = fmt.Errorf("%s returned an empty answer", model.Name)
+		}
 		if err == nil {
 			return resp, model, nil, false
 		}
@@ -121,20 +125,26 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 	return "", model, err, false
 }
 
-// testModelOrder puts the requested model first when the key can use it; the
-// best available model leads otherwise. The rest follow as fallbacks. ok is
-// false when a model was requested that isn't in the list.
-func testModelOrder(models []ModelDef, requested string) (ordered []ModelDef, ok bool) {
+// testModelOrder puts the requested model first when the key can use it, and
+// otherwise the provider's test default (see testDefaultModel). The rest follow
+// as fallbacks. ok is false when a model was requested that isn't in the list.
+func testModelOrder(providerID string, models []ModelDef, requested string) (ordered []ModelDef, ok bool) {
+	ok = true
+	if requested != "" {
+		if _, found := findModel(models, requested); !found {
+			ok, requested = false, ""
+		}
+	}
 	if requested == "" {
-		return models, true
+		requested, _ = testDefaultModel(providerID, models)
 	}
 	for i, m := range models {
 		if m.ID == requested {
 			ordered = append([]ModelDef{m}, models[:i]...)
-			return append(ordered, models[i+1:]...), true
+			return append(ordered, models[i+1:]...), ok
 		}
 	}
-	return models, false
+	return models, ok
 }
 
 func describeUnavailable(list []LLMTestUnavailable) string {

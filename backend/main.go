@@ -255,6 +255,8 @@ func main() {
 	mux.HandleFunc("POST /api/test", withAuth(withRL(ratelimit.LLMTestLimit, handleLLMTest(mongoDB, encryptionKey, apiKey, saasEnabled))))
 	mux.HandleFunc("GET /api/test/{domain}/history", withAuth(handleGetLLMTestHistory(mongoDB)))
 	mux.HandleFunc("GET /api/test/{domain}/competitors", withAuth(handleGetCompetitorTests(mongoDB)))
+	mux.HandleFunc("GET /api/test/{domain}/queries", withAuth(handleGetTestQueries(mongoDB)))
+	mux.HandleFunc("PUT /api/test/{domain}/queries", withAuth(handlePutTestQueries(mongoDB)))
 	mux.HandleFunc("GET /api/test/{domain}", withAuth(handleGetLLMTest(mongoDB)))
 	mux.HandleFunc("DELETE /api/test/{domain}", withAuth(handleDeleteLLMTest(mongoDB)))
 	mux.HandleFunc("POST /api/test/generate-queries", withAuth(withRL(ratelimit.BrandDiscoverLimit, handleGenerateTestQueries(mongoDB))))
@@ -398,6 +400,7 @@ func main() {
 	mux.HandleFunc("OPTIONS /api/test", handleOptions)
 	mux.HandleFunc("OPTIONS /api/test/{domain}/history", handleOptions)
 	mux.HandleFunc("OPTIONS /api/test/{domain}/competitors", handleOptions)
+	mux.HandleFunc("OPTIONS /api/test/{domain}/queries", handleOptions)
 	mux.HandleFunc("OPTIONS /api/test/{domain}", handleOptions)
 	mux.HandleFunc("OPTIONS /api/test/generate-queries", handleOptions)
 	mux.HandleFunc("OPTIONS /api/user/access-keys", handleOptions)
@@ -8206,8 +8209,10 @@ func handleListProviderModels(mongoDB *MongoDB, encKey []byte, fallbackKey strin
 			ID      string      `json:"id"`
 			Name    string      `json:"name"`
 			Models  []modelInfo `json:"models"`
-			Default string      `json:"default,omitempty"` // the best model available
-			Live    bool        `json:"live"`              // true when the list came from the provider
+			Default string      `json:"default,omitempty"` // the LLM Test's default (see testDefaultModel)
+			// DefaultNote says why Default was picked, for the model picker.
+			DefaultNote string `json:"default_note,omitempty"`
+			Live        bool   `json:"live"` // true when the list came from the provider
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
@@ -8233,9 +8238,7 @@ func handleListProviderModels(mongoDB *MongoDB, encKey []byte, fallbackKey strin
 				for _, m := range models {
 					pm.Models = append(pm.Models, modelInfo{ID: m.ID, Name: m.Name})
 				}
-				if len(models) > 0 {
-					pm.Default = models[0].ID
-				}
+				pm.Default, pm.DefaultNote = testDefaultModel(p.ProviderID(), models)
 				result[i] = pm
 			}(i, getProvider(pid))
 		}
@@ -8432,6 +8435,15 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			sendSSE(w, flusher, "error", map[string]string{"message": "At least one query is required"})
 			return
 		}
+		if req.CompetitorOf == "" {
+			// Keep the run's queries as the domain's saved list, so they're there
+			// next time even if the page never got to save them.
+			saveCtx, saveCancel := context.WithTimeout(r.Context(), 5*time.Second)
+			if _, err := saveTestQueries(saveCtx, mongoDB, req.Domain, req.Queries); err != nil {
+				log.Printf("LLM test: saving queries for %s: %v", req.Domain, err)
+			}
+			saveCancel()
+		}
 
 		notify := func(msg string) {
 			sendSSE(w, flusher, "status", map[string]string{"message": msg})
@@ -8472,7 +8484,8 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			return
 		}
 
-		// Pick each provider's model from what its key can use today, best first.
+		// Pick each provider's model from what its key can use today: the one the
+		// tenant chose, else the one the provider's chat app most likely uses.
 		var wg sync.WaitGroup
 		for _, run := range runs {
 			wg.Add(1)
@@ -8480,7 +8493,7 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 				defer wg.Done()
 				models, _ := availableModels(r.Context(), run.provider, run.apiKey)
 				requested := req.Models[run.provider.ProviderID()]
-				ordered, found := testModelOrder(models, requested)
+				ordered, found := testModelOrder(run.provider.ProviderID(), models, requested)
 				if !found && len(ordered) > 0 {
 					notify(fmt.Sprintf("%s: %s isn't offered to this API key any more; using %s instead.", run.provider.Name(), requested, ordered[0].Name))
 				}
