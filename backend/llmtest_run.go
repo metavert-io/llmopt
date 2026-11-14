@@ -7,27 +7,58 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
+	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
-// maxModelSwitches bounds how many times one run moves to a provider's next model.
-const maxModelSwitches = 3
+// maxModelSwitches bounds how many times one run moves to a provider's next
+// model. Switching away from a model the key can't use costs one quick error,
+// and a free Gemini key can't use several of the models listed first.
+const maxModelSwitches = 6
+
+// testCallsPerProvider is how many queries one provider answers at a time.
+// Each provider has its own lanes, so a slow or rate-limited provider holds up
+// only its own queries, and a key with a small per-minute quota isn't flooded.
+const testCallsPerProvider = 2
+
+// maxRateLimitRetries is how many times one query is retried while the
+// provider asks the run to slow down (quota per minute); other retryable
+// errors use providerRetryDelays.
+const maxRateLimitRetries = 4
+
+var (
+	// maxProviderPause caps the total time one run waits on a provider's rate
+	// limit; past it the provider's remaining queries are skipped, so the run
+	// still finishes well inside its time budget.
+	maxProviderPause = 5 * time.Minute
+	// pauseNoteMin is the shortest pause worth telling the user about.
+	pauseNoteMin = 10 * time.Second
+	// slowCallNote is how long one call may take before the user hears why
+	// a provider's answers aren't arriving.
+	slowCallNote = 75 * time.Second
+)
 
 type testProviderRun struct {
 	provider LLMProvider
 	apiKey   string
 	notify   func(string) // progress notes for the client
 
-	mu       sync.Mutex
-	models   []ModelDef // candidates, the chosen model first
-	modelIdx int
-	switches int
-	deadErr  error // set once the key, or every model, has failed for good
-	lastErr  error
-	answered int
-	failed   int
+	mu         sync.Mutex
+	models     []ModelDef // candidates, the chosen model first
+	modelIdx   int
+	switches   int
+	deadErr    error // set once the key, or every model, has failed for good
+	lastErr    error
+	answered   int
+	failed     int
+	pauseUntil time.Time     // no calls before this: the provider asked the run to slow down
+	paused     time.Duration // total pause so far
+	slowNoted  bool
 }
 
 func (pr *testProviderRun) currentModel() ModelDef {
@@ -74,8 +105,10 @@ func (pr *testProviderRun) record(err error) {
 }
 
 // ask sends one query. It moves to the provider's next model when the current
-// one is retired, and stops calling the provider once its key is known to be
-// unusable. skipped is true when no call was made because of an earlier failure.
+// one is retired, isn't available to the key, or (before it has answered
+// anything) times out or stays rate-limited, and stops calling the provider
+// once its key is known to be unusable. skipped is true when no call was made
+// because of an earlier failure.
 func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int) (resp string, model ModelDef, err error, skipped bool) {
 	for attempt := 0; attempt <= maxModelSwitches; attempt++ {
 		pr.mu.Lock()
@@ -86,7 +119,7 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 			return "", model, dead, attempt == 0
 		}
 
-		resp, err = callWithRetry(ctx, pr.provider, pr.apiKey, model.ID, query, maxTokens)
+		resp, err = pr.call(ctx, model, query, maxTokens)
 		if err == nil && strings.TrimSpace(resp) == "" {
 			// A blank answer would be scored as "brand not mentioned".
 			err = fmt.Errorf("%s returned an empty answer", model.Name)
@@ -97,7 +130,19 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 		if ctx.Err() != nil {
 			return "", model, err, false
 		}
-		switch classifyProviderError(err) {
+		log.Printf("LLM test: %s (%s) failed: %s", pr.provider.Name(), model.ID, truncateStr(err.Error(), 400))
+		if pr.pausedTooLong() {
+			pr.markDead(err)
+			return "", model, err, false
+		}
+		class := classifyProviderError(err)
+		if pr.answeredNone() && (isTimeoutError(err) || isRateLimitQuota(err)) {
+			// A model that hasn't answered once in this run and doesn't answer in
+			// time, or stays over its quota, is no use to this key today; the
+			// provider's other models have their own capacity and quotas.
+			class = failModel
+		}
+		switch class {
 		case failKey:
 			pr.markDead(err)
 			return "", model, err, false
@@ -112,7 +157,7 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 				pr.switches++
 				next := pr.models[pr.modelIdx]
 				pr.mu.Unlock()
-				pr.notify(fmt.Sprintf("%s: %s isn't available to this API key; switching to %s.", pr.provider.Name(), model.Name, next.Name))
+				pr.notify(fmt.Sprintf("%s: %s; switching to %s.", pr.provider.Name(), switchReason(model, err), next.Name))
 				continue
 			}
 			pr.mu.Unlock()
@@ -123,6 +168,158 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 		}
 	}
 	return "", model, err, false
+}
+
+// call sends one query to model, waiting out any pause the provider asked for
+// and retrying rate-limit and overload failures. A rate limit pauses all of
+// this provider's queries, not just this one, so its lanes don't keep hitting
+// a limit that has no room.
+func (pr *testProviderRun) call(ctx context.Context, model ModelDef, query string, maxTokens int) (string, error) {
+	for attempt := 0; ; attempt++ {
+		if err := pr.waitPause(ctx); err != nil {
+			return "", err
+		}
+		resp, err := pr.callNotingSlow(ctx, model, query, maxTokens)
+		if err == nil || ctx.Err() != nil || classifyProviderError(err) != failRetry {
+			return resp, err
+		}
+		retries := len(providerRetryDelays)
+		if isRateLimitQuota(err) {
+			retries = maxRateLimitRetries
+		}
+		if attempt >= retries || !pr.pause(retryWait(attempt, err), err) {
+			return "", err
+		}
+	}
+}
+
+// callNotingSlow makes one provider call and, if it takes longer than
+// slowCallNote, tells the user once per run that this provider is slow. The
+// note is sent before the call returns, never after the run has finished.
+func (pr *testProviderRun) callNotingSlow(ctx context.Context, model ModelDef, query string, maxTokens int) (string, error) {
+	done := make(chan struct{})
+	watched := make(chan struct{})
+	go func() {
+		defer close(watched)
+		t := time.NewTimer(slowCallNote)
+		defer t.Stop()
+		select {
+		case <-done:
+		case <-t.C:
+			pr.noteSlow(model)
+		}
+	}()
+	resp, err := pr.provider.Call(ctx, pr.apiKey, model.ID, query, maxTokens)
+	close(done)
+	<-watched
+	return resp, err
+}
+
+func (pr *testProviderRun) noteSlow(model ModelDef) {
+	pr.mu.Lock()
+	first := !pr.slowNoted && pr.deadErr == nil
+	pr.slowNoted = true
+	pr.mu.Unlock()
+	if first {
+		pr.notify(fmt.Sprintf("%s (%s) is slow to answer: one query has taken over a minute so far. Still waiting; the other providers carry on.",
+			pr.provider.Name(), model.Name))
+	}
+}
+
+// waitPause blocks until the provider's current pause is over.
+func (pr *testProviderRun) waitPause(ctx context.Context) error {
+	for {
+		pr.mu.Lock()
+		d := time.Until(pr.pauseUntil)
+		dead := pr.deadErr
+		pr.mu.Unlock()
+		if dead != nil {
+			return dead
+		}
+		if d <= 0 {
+			return nil
+		}
+		t := time.NewTimer(d)
+		select {
+		case <-ctx.Done():
+			t.Stop()
+			return ctx.Err()
+		case <-t.C:
+		}
+	}
+}
+
+// pause holds all of this provider's queries for wait. It returns false once
+// the run has spent maxProviderPause waiting on this provider.
+func (pr *testProviderRun) pause(wait time.Duration, err error) bool {
+	now := time.Now()
+	until := now.Add(wait)
+	pr.mu.Lock()
+	started := !pr.pauseUntil.After(now)
+	if until.After(pr.pauseUntil) {
+		from := now
+		if pr.pauseUntil.After(now) {
+			from = pr.pauseUntil
+		}
+		pr.paused += until.Sub(from)
+		pr.pauseUntil = until
+	}
+	over := pr.paused > maxProviderPause
+	pr.mu.Unlock()
+	if over {
+		return false
+	}
+	if started && wait >= pauseNoteMin {
+		detail := ""
+		var qe *QuotaError
+		if errors.As(err, &qe) && qe.Message != "" {
+			detail = fmt.Sprintf(" (%s: %s)", qe.Provider, truncateStr(qe.Message, 200))
+		}
+		log.Printf("LLM test: %s rate-limited, pausing %s: %s", pr.provider.Name(), wait.Round(time.Second), truncateStr(err.Error(), 300))
+		pr.notify(fmt.Sprintf("%s is rate-limiting this API key; pausing its queries for %s%s.",
+			pr.provider.Name(), wait.Round(time.Second), detail))
+	}
+	return true
+}
+
+func (pr *testProviderRun) pausedTooLong() bool {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	return pr.paused > maxProviderPause
+}
+
+func (pr *testProviderRun) answeredNone() bool {
+	pr.mu.Lock()
+	defer pr.mu.Unlock()
+	return pr.answered == 0
+}
+
+// isTimeoutError reports a call that got no reply in time (the HTTP client's
+// timeout), as opposed to the run's own deadline.
+func isTimeoutError(err error) bool {
+	var ne net.Error
+	if errors.As(err, &ne) && ne.Timeout() {
+		return true
+	}
+	return err != nil && strings.Contains(err.Error(), "Client.Timeout exceeded")
+}
+
+// isRateLimitQuota reports a quota that refills (requests per minute), as
+// opposed to one the model doesn't have for this key at all.
+func isRateLimitQuota(err error) bool {
+	var qe *QuotaError
+	return errors.As(err, &qe) && !qe.PerModel
+}
+
+// switchReason says why a run is leaving a model, for the progress notes.
+func switchReason(model ModelDef, err error) string {
+	switch {
+	case isTimeoutError(err):
+		return model.Name + " didn't answer in time"
+	case isRateLimitQuota(err):
+		return model.Name + " stayed over this API key's rate limit"
+	}
+	return model.Name + " isn't available to this API key"
 }
 
 // testModelOrder puts the requested model first when the key can use it, and
