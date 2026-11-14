@@ -961,6 +961,8 @@ export default function App() {
   const [redditAnalyzing, setRedditAnalyzing] = useState(false)
   const redditAbortRef = useRef<AbortController | null>(null)
   const [redditMessages, setRedditMessages] = useState<string[]>([])
+  // Why the last Discover failed; shown on the input view, which the run returns to.
+  const [redditDiscoverError, setRedditDiscoverError] = useState('')
   const [redditAnalysis, setRedditAnalysis] = useState<RedditAnalysis | null>(null)
   const [redditAnalysisList, setRedditAnalysisList] = useState<RedditAnalysisSummary[]>([])
   const [redditDomain, setRedditDomain] = useState('')
@@ -2138,6 +2140,7 @@ export default function App() {
     if (!redditDomain.trim()) return
     setRedditDiscovering(true)
     setRedditMessages([])
+    setRedditDiscoverError('')
     setDiscoveredThreads([])
     setSelectedThreadIds(new Set())
     setRedditView('discovering')
@@ -2211,6 +2214,7 @@ export default function App() {
                 setRedditView('review')
               } else if (currentEvent === 'error') {
                 setRedditMessages(prev => [...prev, data.message || 'Discovery failed'])
+                setRedditDiscoverError(data.message || 'Discovery failed')
                 setRedditView('input')
               }
             } catch { /* ignore malformed JSON */ }
@@ -2220,6 +2224,7 @@ export default function App() {
       }
     } catch (err) {
       setRedditMessages(['Connection failed: ' + (err as Error).message])
+      setRedditDiscoverError('Connection failed: ' + (err as Error).message)
       setRedditView('input')
     } finally {
       setRedditDiscovering(false)
@@ -3002,6 +3007,7 @@ export default function App() {
   // Auto-scroll SSE message containers to bottom
   useEffect(() => { videoMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [videoMessages])
   useEffect(() => { redditMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [redditMessages])
+  useEffect(() => { setRedditDiscoverError('') }, [redditDomain])
   useEffect(() => { searchMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [searchMessages])
   useEffect(() => { testMessagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [testMessages])
 
@@ -9155,6 +9161,11 @@ curl -X PATCH \\
                 >
                   {redditDiscovering ? 'Discovering...' : 'Discover Reddit Threads'}
                 </button>
+                {redditDiscoverError && !redditDiscovering && (
+                  <div className="mt-3 p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-300 text-sm">
+                    {redditDiscoverError}
+                  </div>
+                )}
                 {redditSearchTerms.length === 0 && !redditDiscovering && (
                   <p className="text-dark-500 text-xs mt-2 text-center">
                     Add at least one search term above to discover threads. Target queries from the Brand Profile are added here automatically.

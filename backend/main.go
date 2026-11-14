@@ -6732,7 +6732,11 @@ func handleRedditDiscover(mongoDB *MongoDB) http.HandlerFunc {
 
 		threads, err := redditDiscoverThreads(subs, allTerms, timeFilter, 15, 2*time.Second, progress)
 		if err != nil {
-			sendSSE(w, flusher, "error", map[string]string{"message": "Reddit discovery failed: " + err.Error()})
+			msg := "Reddit discovery failed: " + truncateErr(err, 200)
+			if errors.Is(err, errRedditBlocked) {
+				msg = "Reddit blocked this search (HTTP 403, \"blocked by network security\"). Reddit now refuses anonymous searches like the ones this tab makes, from servers and home connections alike, so no threads could be found."
+			}
+			sendSSE(w, flusher, "error", map[string]string{"message": msg})
 			return
 		}
 
