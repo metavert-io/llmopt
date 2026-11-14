@@ -27,7 +27,7 @@ func TestListenAddr(t *testing.T) {
 		{"localhost", true, "localhost:8080", false},
 		{"0.0.0.0", true, "", true},
 		{"100.64.0.7", true, "", true}, // a Tailscale address is still not loopback
-		{"192.168.4.20", true, "", true},
+		{"192.0.2.20", true, "", true}, // a LAN-style address (documentation range)
 		{"0.0.0.0", false, "0.0.0.0:8080", false},
 	}
 	for _, c := range cases {

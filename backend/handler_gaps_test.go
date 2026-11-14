@@ -585,12 +585,12 @@ func TestResolveOwnerName_Success(t *testing.T) {
 	})
 	db.Database.Collection("users").InsertOne(ctx, bson.M{
 		"_id":         userOID,
-		"displayName": "Jon Radoff",
+		"displayName": "Example User",
 	})
 
 	result := resolveOwnerName(ctx, db, tenantOID.Hex())
-	if result != "Jon Radoff" {
-		t.Errorf("expected 'Jon Radoff', got %q", result)
+	if result != "Example User" {
+		t.Errorf("expected 'Example User', got %q", result)
 	}
 }
 
