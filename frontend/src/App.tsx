@@ -702,6 +702,9 @@ interface LLMTestResult {
 }
 
 type AppState = 'idle' | 'analyzing' | 'done' | 'error'
+
+// How many questions Optimize All works on at once.
+const BATCH_OPTIMIZE_PARALLEL = 4
 type ActiveTab = 'analyze' | 'status' | 'optimize' | 'todos' | 'brand' | 'video' | 'reddit' | 'search' | 'test'
 
 const CATEGORY_COLORS = [
@@ -855,7 +858,8 @@ export default function App() {
 
   // Batch optimize
   const [batchOptimizing, setBatchOptimizing] = useState(false)
-  const [batchOptProgress, setBatchOptProgress] = useState({ current: 0, total: 0 })
+  const [batchOptProgress, setBatchOptProgress] = useState({ done: 0, total: 0, failed: 0, running: 0 })
+  const [batchOptSummary, setBatchOptSummary] = useState('')
 
   // Modals for optimize question click + auth/subscription gating
   const [optimizeConfirmQ, setOptimizeConfirmQ] = useState<number | null>(null) // question index for confirmation
@@ -4029,28 +4033,62 @@ export default function App() {
     if (unoptimized.length === 0) return
 
     setBatchOptimizing(true)
-    setBatchOptProgress({ current: 0, total: unoptimized.length })
+    setBatchOptSummary('')
+    const total = unoptimized.length
+    let done = 0, failed = 0, running = 0
+    const show = () => setBatchOptProgress({ done, total, failed, running })
+    show()
 
-    for (let idx = 0; idx < unoptimized.length; idx++) {
-      const { i: questionIdx } = unoptimized[idx]
-      setBatchOptProgress({ current: idx + 1, total: unoptimized.length })
-
+    // Optimizes one question; true when the server streamed a result without an error.
+    const optimizeOne = async (questionIdx: number): Promise<boolean | 'rate-limited'> => {
       try {
         const response = await apiFetch(`/api/analyses/${resultMeta.id}/questions/${questionIdx}/optimize`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ force: false }),
         })
-        if (!response.ok || !response.body) continue
-
-        // Consume the SSE stream to completion
+        if (response.status === 429) return 'rate-limited'
+        if (!response.ok || !response.body) return false
+        // Consume the SSE stream to completion, noting whether it ended in an error.
         const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let tail = '', sawDone = false, sawError = false
         while (true) {
-          const { done } = await reader.read()
-          if (done) break
+          const { done: end, value } = await reader.read()
+          if (end) break
+          tail = (tail + decoder.decode(value, { stream: true })).slice(-4096)
+          if (tail.includes('event: error')) sawError = true
+          if (tail.includes('event: done')) sawDone = true
         }
-      } catch { /* continue with next question */ }
+        return sawDone && !sawError
+      } catch {
+        return false
+      }
     }
+
+    // A few questions at a time (each is a long web-search run); the server
+    // allows 10 optimize requests a minute, so a rate-limited one waits and goes
+    // back in the queue.
+    const queue = unoptimized.map(({ i }) => i)
+    const worker = async () => {
+      for (let qi = queue.shift(); qi !== undefined; qi = queue.shift()) {
+        running++; show()
+        const ok = await optimizeOne(qi)
+        running--
+        if (ok === 'rate-limited') {
+          show()
+          await new Promise(r => setTimeout(r, 15000))
+          queue.push(qi)
+          continue
+        }
+        if (ok) done++; else failed++
+        show()
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(BATCH_OPTIMIZE_PARALLEL, total) }, worker))
+    setBatchOptSummary(failed > 0
+      ? `Optimize All finished: ${done} optimized, ${failed} failed. Click Optimize All again to retry the ones that failed.`
+      : `Optimize All finished: ${done} optimized.`)
 
     setBatchOptimizing(false)
     setVisibilityScoreVersion(v => v + 1)
@@ -5504,9 +5542,15 @@ curl -X PATCH \\
                           className="text-xs px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 cursor-pointer whitespace-nowrap shrink-0 bg-accent-purple/10 border border-accent-purple/20 text-purple-300 hover:bg-accent-purple/20 hover:text-purple-200"
                         >
                           {batchOptimizing
-                            ? `Optimizing ${batchOptProgress.current}/${batchOptProgress.total}...`
+                            ? `Optimizing ${batchOptProgress.done + batchOptProgress.failed}/${batchOptProgress.total} · ${batchOptProgress.running} running${batchOptProgress.failed ? ` · ${batchOptProgress.failed} failed` : ''}`
                             : 'Optimize All'}
                         </button>
+                      )}
+                      {batchOptimizing && (
+                        <span className="text-dark-500 text-xs">Keep this tab open until it finishes; each question takes a few minutes.</span>
+                      )}
+                      {!batchOptimizing && batchOptSummary && (
+                        <span className={`text-xs ${batchOptSummary.includes('failed') ? 'text-amber-300' : 'text-dark-400'}`}>{batchOptSummary}</span>
                       )}
                     </div>
                   )}
