@@ -2865,6 +2865,18 @@ export default function App() {
     sendTestQuerySave(pending.domain, pending.body, true)
   }
 
+  // Re-running starts from exactly the queries of the results on screen; that
+  // list then becomes the domain's saved list.
+  const rerunFromResults = () => {
+    const shown = testResults?.queries
+    if (selectedDomain && Array.isArray(shown) && shown.length > 0) {
+      testQueriesDomainRef.current = selectedDomain // a saved-list load still in flight won't replace it
+      setTestQueries(shown.map(q => ({ query: q.query, type: q.type, priority: q.priority })))
+    }
+    setTestView('input')
+    setTestResults(null)
+  }
+
   // Save the query list shortly after each edit.
   useEffect(() => {
     const domain = testQueriesDomainRef.current
@@ -2921,7 +2933,8 @@ export default function App() {
             const qData = r.ok ? await r.json() : null
             if (Array.isArray(qData?.queries)) qs = qData.queries
           }
-          if (selectedDomainRef.current !== domain) return
+          // Skip if the domain changed, or Re-run already filled the list.
+          if (selectedDomainRef.current !== domain || testQueriesDomainRef.current === domain) return
           testQueriesSyncedRef.current = JSON.stringify({ queries: qs })
           testQueriesDomainRef.current = domain
           setTestQueries(qs)
@@ -10106,7 +10119,7 @@ curl -X PATCH \\
                   <div className="flex items-center justify-between">
                     {!readOnly ? (
                       <button
-                        onClick={() => { setTestView('input'); setTestResults(null) }}
+                        onClick={rerunFromResults}
                         className="text-dark-400 hover:text-white transition-colors cursor-pointer text-sm flex items-center gap-1"
                       >
                         <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
@@ -10127,7 +10140,7 @@ curl -X PATCH \\
                         <>
                           <button onClick={() => setShowCompetitorModal(true)} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-amber-400 rounded-lg hover:bg-amber-900/30 hover:border-amber-800 transition-all cursor-pointer">Test Competitor</button>
                           <button onClick={() => setConfirmDeleteTest(true)} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-red-400 rounded-lg hover:bg-red-900/30 hover:border-red-800 transition-all cursor-pointer">Delete</button>
-                          <button onClick={() => { setTestView('input'); setTestResults(null) }} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-primary-400 rounded-lg hover:bg-dark-700 hover:text-primary-300 transition-all cursor-pointer">Re-run Test</button>
+                          <button onClick={rerunFromResults} className="text-xs px-3 py-1.5 bg-dark-800 border border-dark-700 text-primary-400 rounded-lg hover:bg-dark-700 hover:text-primary-300 transition-all cursor-pointer">Re-run Test</button>
                         </>
                       )}
                     </div>
