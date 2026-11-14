@@ -136,6 +136,11 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 			return "", model, err, false
 		}
 		class := classifyProviderError(err)
+		if (isTimeoutError(err) || isRateLimitQuota(err)) && pr.currentModel().ID != model.ID {
+			// Another query already left this model (and may have answered on the
+			// next one while this call was still waiting): retry on the new model.
+			continue
+		}
 		if pr.answeredNone() && (isTimeoutError(err) || isRateLimitQuota(err)) {
 			// A model that hasn't answered once in this run and doesn't answer in
 			// time, or stays over its quota, is no use to this key today; the
