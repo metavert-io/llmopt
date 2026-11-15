@@ -22,10 +22,12 @@ type AnthropicProvider struct{}
 func (p *AnthropicProvider) ProviderID() string { return "anthropic" }
 func (p *AnthropicProvider) Name() string       { return "Anthropic" }
 
+// Models is the order analyses try Claude models in: Opus 5.5 first, Sonnet
+// 5.5 when Opus is overloaded.
 func (p *AnthropicProvider) Models() []ModelDef {
 	return []ModelDef{
-		{ID: "claude-sonnet-4-6", Name: "Sonnet 4.6"},
-		{ID: "claude-haiku-4-5-20251001", Name: "Haiku 4.5"},
+		{ID: "claude-opus-5-5", Name: "Opus 5.5"},
+		{ID: "claude-sonnet-5-5", Name: "Sonnet 5.5"},
 	}
 }
 
@@ -152,12 +154,15 @@ func (p *AnthropicProvider) Stream(ctx context.Context, apiKey string, body []by
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 529 || resp.StatusCode == 429 {
-		log.Printf("Claude API returned %d (overloaded/rate-limited)", resp.StatusCode)
-		return nil, ErrOverloaded
-	}
 	if resp.StatusCode != 200 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := providerCreditError("Anthropic", errBody); err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == 529 || resp.StatusCode == 429 {
+			log.Printf("Claude API returned %d (overloaded/rate-limited)", resp.StatusCode)
+			return nil, ErrOverloaded
+		}
 		return nil, fmt.Errorf("Claude API error (%d): %s", resp.StatusCode, string(errBody))
 	}
 
@@ -205,6 +210,9 @@ func (p *AnthropicProvider) Stream(ctx context.Context, apiKey string, body []by
 			log.Printf("Claude API stream error: type=%s message=%s", errType, errMsg)
 			if errType == "overloaded_error" {
 				return nil, ErrOverloaded
+			}
+			if err := providerCreditError("Anthropic", []byte(errMsg)); err != nil {
+				return nil, err
 			}
 			return nil, fmt.Errorf("%s", errMsg)
 

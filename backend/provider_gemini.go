@@ -175,12 +175,15 @@ func (p *GeminiProvider) Stream(ctx context.Context, apiKey string, body []byte,
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 || resp.StatusCode == 529 || resp.StatusCode == 503 {
-		log.Printf("Gemini API returned %d (overloaded/rate-limited)", resp.StatusCode)
-		return nil, ErrOverloaded
-	}
 	if resp.StatusCode != 200 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := providerCreditError("Gemini", errBody); err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == 429 || resp.StatusCode == 529 || resp.StatusCode == 503 {
+			log.Printf("Gemini API returned %d (overloaded/rate-limited)", resp.StatusCode)
+			return nil, ErrOverloaded
+		}
 		return nil, fmt.Errorf("Gemini API error (%d): %s", resp.StatusCode, string(errBody))
 	}
 

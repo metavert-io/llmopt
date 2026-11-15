@@ -2,6 +2,8 @@
 
 ## 2026-11-14
 
+- **Models**: analyses and answer optimization now run on Claude Opus 5.5 (Sonnet 5.5 when Opus is overloaded) instead of Sonnet 4.6. The status page probes Opus 5.5.
+- **Out of credit**: when the AI provider account behind your API key is out of credit, the app says so ("Your AI provider account is out of credit, so this can't run…", with where to add credit) instead of calling it "an upstream provider issue". Every provider's streaming calls now read a 429 before deciding: insufficient quota or billing is out of credit, and only a real rate limit counts as "overloaded". Optimize All stops at the first out-of-credit error and says how many questions it finished, instead of failing through the rest.
 - **Report**: the downloadable report is redesigned. It's built as an HTML page styled like the app and printed to PDF by headless Chromium, which is already in the hosted image for screenshots (`backend/report_html.go`, `backend/reporttpl/report.html`).
   - **Cover:** the LLM Visibility Score as a ring, with the five dimension cards from the app's scorecard.
   - **Executive summary:** a scorecard page with a "Top 3 actions" box and key themes as cards.

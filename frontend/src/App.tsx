@@ -4064,8 +4064,10 @@ export default function App() {
     const show = () => setBatchOptProgress({ done, total, failed, running })
     show()
 
+    // Set when the AI provider account is out of credit: nothing else can run.
+    let halted = ''
     // Optimizes one question; true when the server streamed a result without an error.
-    const optimizeOne = async (questionIdx: number): Promise<boolean | 'rate-limited'> => {
+    const optimizeOne = async (questionIdx: number): Promise<boolean | 'rate-limited' | 'out-of-credit'> => {
       try {
         const response = await apiFetch(`/api/analyses/${resultMeta.id}/questions/${questionIdx}/optimize`, {
           method: 'POST',
@@ -4079,15 +4081,25 @@ export default function App() {
         // "done" line), plus a short carry-over for a line split across chunks.
         const reader = response.body.getReader()
         const decoder = new TextDecoder()
-        let carry = '\n', sawDone = false, sawError = false
+        let carry = '\n', sawDone = false, sawError = false, outOfCredit = false
         while (true) {
           const { done: end, value } = await reader.read()
           if (end) break
           const text = carry + decoder.decode(value, { stream: true })
-          if (text.includes('\nevent: error\n')) sawError = true
+          if (text.includes('\nevent: error\n')) {
+            sawError = true
+            const m = text.match(/\nevent: error\ndata: (\{[^\n]*\})/)
+            if (m) {
+              try {
+                const e = JSON.parse(m[1]) as { code?: string; message?: string }
+                if (e.code === 'api_credits') { outOfCredit = true; halted = e.message || 'Your AI provider account is out of credit.' }
+              } catch { /* not JSON */ }
+            }
+          }
           if (text.includes('\nevent: done\n')) sawDone = true
-          carry = text.slice(-32)
+          carry = text.slice(-256)
         }
+        if (outOfCredit) return 'out-of-credit'
         return sawDone && !sawError
       } catch {
         return false
@@ -4099,10 +4111,11 @@ export default function App() {
     // back in the queue.
     const queue = unoptimized.map(({ i }) => i)
     const worker = async () => {
-      for (let qi = queue.shift(); qi !== undefined; qi = queue.shift()) {
+      for (let qi = queue.shift(); qi !== undefined && !halted; qi = queue.shift()) {
         running++; show()
         const ok = await optimizeOne(qi)
         running--
+        if (ok === 'out-of-credit') { failed++; show(); break }
         if (ok === 'rate-limited') {
           show()
           await new Promise(r => setTimeout(r, 15000))
@@ -4114,9 +4127,11 @@ export default function App() {
       }
     }
     await Promise.all(Array.from({ length: Math.min(BATCH_OPTIMIZE_PARALLEL, total) }, worker))
-    setBatchOptSummary(failed > 0
-      ? `Optimize All finished: ${done} optimized, ${failed} failed. Click Optimize All again to retry the ones that failed.`
-      : `Optimize All finished: ${done} optimized.`)
+    setBatchOptSummary(halted
+      ? `Optimize All stopped: ${halted} ${done} question${done === 1 ? ' was' : 's were'} optimized before it stopped; click Optimize All again after adding credit.`
+      : failed > 0
+        ? `Optimize All finished: ${done} optimized, ${failed} failed. Click Optimize All again to retry the ones that failed.`
+        : `Optimize All finished: ${done} optimized.`)
 
     setBatchOptimizing(false)
     setVisibilityScoreVersion(v => v + 1)
@@ -5603,7 +5618,7 @@ curl -X PATCH \\
                         <span className="text-dark-500 text-xs">Keep this tab open until it finishes; each question takes a few minutes.</span>
                       )}
                       {!batchOptimizing && batchOptSummary && (
-                        <span className={`text-xs ${batchOptSummary.includes('failed') ? 'text-amber-300' : 'text-dark-400'}`}>{batchOptSummary}</span>
+                        <span className={`text-xs ${batchOptSummary.includes('stopped') ? 'text-red-300' : batchOptSummary.includes('failed') ? 'text-amber-300' : 'text-dark-400'}`}>{batchOptSummary}</span>
                       )}
                     </div>
                   )}

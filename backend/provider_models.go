@@ -112,6 +112,27 @@ const (
 // reasons (prepaid credits used up, no billing account), as opposed to a quota.
 var geminiBillingMarkers = []string{"credits are depleted", "prepay", "billing account", "billing is not enabled", "billing_disabled"}
 
+// creditError is a provider refusing a request because the API key's account
+// is out of credit (or has a billing problem): nothing will run until the
+// owner adds credit, so callers stop and say so instead of retrying.
+type creditError struct {
+	Provider string
+	Message  string
+}
+
+func (e *creditError) Error() string {
+	return e.Provider + " API key is out of credit: " + e.Message
+}
+
+// providerCreditError returns a *creditError when an error body says the
+// account is out of credit or has a billing problem, else nil.
+func providerCreditError(provider string, body []byte) error {
+	if isBillingMessage(strings.ToLower(string(body))) {
+		return &creditError{Provider: provider, Message: truncateStr(strings.Join(strings.Fields(string(body)), " "), 300)}
+	}
+	return nil
+}
+
 // isBillingMessage reports an error body (lowercased) that says the key is out
 // of credit or has a billing problem. A bare "billing" isn't enough: OpenAI's
 // ordinary rate-limit message links to its billing page.

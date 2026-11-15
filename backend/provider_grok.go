@@ -117,12 +117,15 @@ func (p *GrokProvider) Stream(ctx context.Context, apiKey string, body []byte, w
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 || resp.StatusCode == 529 {
-		log.Printf("Grok API returned %d (overloaded/rate-limited)", resp.StatusCode)
-		return nil, ErrOverloaded
-	}
 	if resp.StatusCode != 200 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := providerCreditError("Grok", errBody); err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == 429 || resp.StatusCode == 529 {
+			log.Printf("Grok API returned %d (overloaded/rate-limited)", resp.StatusCode)
+			return nil, ErrOverloaded
+		}
 		return nil, fmt.Errorf("Grok API error (%d): %s", resp.StatusCode, string(errBody))
 	}
 
