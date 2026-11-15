@@ -10895,6 +10895,7 @@ curl -X PATCH \\
                               const recommended = graded.filter(pr => pr.recommended).length
                               const avg = graded.length ? Math.round(graded.reduce((n, pr) => n + pr.score, 0) / graded.length) : 0
                               const first = g.items[0]
+                              const noAnswer = graded.length === 0 // every call failed: nothing to score
                               const toggle = () => setTestExpandedCells(prev => {
                                 const next = new Set(prev)
                                 if (next.has(cellKey)) next.delete(cellKey)
@@ -10907,7 +10908,9 @@ curl -X PATCH \\
                                     <div className="flex items-center gap-3 flex-wrap min-w-0">
                                       <span className="text-dark-400 text-xs font-medium w-20 shrink-0">{first.provider_name}</span>
                                       {g.search && <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">web search</span>}
-                                      {g.items.length > 1 ? (
+                                      {noAnswer ? (
+                                        <span className="text-xs text-amber-400/80" title="The provider returned an error, so there's nothing to score">No answer{g.items.length > 1 ? ` in ${g.items.length} runs` : ''}</span>
+                                      ) : g.items.length > 1 ? (
                                         <div className="flex items-center gap-2 text-xs">
                                           <span className={mentioned > 0 ? 'text-emerald-400' : 'text-dark-600'}>Mentioned in {mentioned} of {graded.length} runs</span>
                                           {recommended > 0 && <span className="text-amber-400">★ Recommended in {recommended}</span>}
@@ -10926,7 +10929,9 @@ curl -X PATCH \\
                                       )}
                                     </div>
                                     <div className="flex items-center gap-2 shrink-0">
-                                      <span className={`text-sm font-bold ${scoreColor(avg)}`} title={g.items.length > 1 ? 'Average over the runs' : undefined}>{avg}</span>
+                                      {noAnswer
+                                        ? <span className="text-sm font-bold text-dark-600">–</span>
+                                        : <span className={`text-sm font-bold ${scoreColor(avg)}`} title={g.items.length > 1 ? 'Average over the runs' : undefined}>{avg}</span>}
                                       <button onClick={toggle} className="text-dark-500 hover:text-white transition-colors cursor-pointer">
                                         <svg className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                                       </button>
@@ -10942,9 +10947,11 @@ curl -X PATCH \\
                                           {g.items.length > 1 && (
                                             <div className="flex items-center gap-2 text-xs mb-1.5">
                                               <span className="text-dark-500 font-medium">Run {pr.run || k + 1}</span>
-                                              <span className={pr.mentioned ? 'text-emerald-400' : 'text-dark-600'}>{pr.mentioned ? '✓ Mentioned' : '✗ Not mentioned'}</span>
-                                              {pr.recommended && <span className="text-amber-400">★ Recommended</span>}
-                                              <span className={`font-semibold ${scoreColor(pr.score)}`}>{pr.score}</span>
+                                              {pr.response.startsWith('Error: ') ? <span className="text-amber-400/80">No answer</span> : <>
+                                                <span className={pr.mentioned ? 'text-emerald-400' : 'text-dark-600'}>{pr.mentioned ? '✓ Mentioned' : '✗ Not mentioned'}</span>
+                                                {pr.recommended && <span className="text-amber-400">★ Recommended</span>}
+                                                <span className={`font-semibold ${scoreColor(pr.score)}`}>{pr.score}</span>
+                                              </>}
                                             </div>
                                           )}
                                           <div className="text-dark-300 text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">{pr.response}</div>

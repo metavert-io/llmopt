@@ -2,6 +2,7 @@
 
 ## 2026-11-15
 
+- **LLM Test**: a call that failed (for example a provider's quota error) now shows "No answer" without a score in the query results, instead of reading like an answer that didn't mention the brand.
 - **Update advice (second pass)**: the reviser is now told how retired advice actually appears in older results and how to fix each case:
   - summary boxes as AI extraction targets;
   - FAQ and Schema.org markup for AI citation;
