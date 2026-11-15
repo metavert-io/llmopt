@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -21,13 +22,48 @@ var retiredClaims = []string{
 	"GPTBot up 305%",        // no longer a visibility lever
 }
 
-func TestReportDigest_NoRetiredClaims(t *testing.T) {
-	digest := strings.Join(reportResearchDigest, "\n")
-	for _, c := range retiredClaims {
+// Claims the November 2026 addendum retired from the research digests: one
+// prompt set's Reddit share stated as a fact, YouTube "#1 across AI
+// assistants" without the Google-surface caveat, and Wikipedia as ChatGPT's
+// top domain.
+var retiredDigestClaims = []string{
+	"#2 cited domain (6.2%)",
+	"Reddit is the #2",
+	"and across AI assistants",
+	"Wikipedia is ChatGPT's most-cited domain",
+}
+
+// addendumFindings must appear in every copy of the digest.
+var addendumFindings = []string{
+	"title and key paragraph match",
+	"API and its consumer app",
+	"15-25 runs",
+	"retrieved but did not cite",
+	"one of its own pages was cited",
+	"AIPREF",
+}
+
+// checkDigest applies the retired-claim rules to one copy of the digest.
+func checkDigest(t *testing.T, name, digest string) {
+	t.Helper()
+	for _, c := range append(append([]string{}, retiredClaims...), retiredDigestClaims...) {
 		if strings.Contains(digest, c) {
-			t.Errorf("report digest still contains retired claim %q", c)
+			t.Errorf("%s still contains retired claim %q", name, c)
 		}
 	}
+	// The SIGIR association may only appear with Google's own statement.
+	if strings.Contains(digest, "less AI Overview retrieval") && !strings.Contains(digest, "Google says it does not affect inclusion or ranking in Google Search") {
+		t.Errorf("%s states the Google-Extended association without Google's caveat", name)
+	}
+	for _, want := range addendumFindings {
+		if !strings.Contains(digest, want) {
+			t.Errorf("%s is missing the addendum finding %q", name, want)
+		}
+	}
+}
+
+func TestReportDigest_NoRetiredClaims(t *testing.T) {
+	checkDigest(t, "report digest", strings.Join(reportResearchDigest, "\n"))
 }
 
 // key2026Sources must be cited by the report bibliography and the methodology page.
@@ -42,6 +78,20 @@ var key2026Sources = []string{
 	"https://www.conductor.com/academy/reddit-ai-citation-decline/",
 	"https://developers.openai.com/api/docs/bots",
 	"https://www.ebu.ch/research/open/report/news-integrity-in-ai-assistants",
+	// November 2026 addendum
+	"https://aclanthology.org/2026.findings-acl.526/", // Kirsten et al., variance
+	"https://arxiv.org/abs/2610.15033",                // Chen & Koudas, within-site features
+	"https://arxiv.org/abs/2604.25707",                // citation absorption
+	"https://arxiv.org/abs/2609.07559",                // 2023 levers re-tested
+	"https://arxiv.org/abs/2609.23162",                // own-domain retrieval
+	"https://arxiv.org/abs/2611.07614",                // popularity bias
+	"https://arxiv.org/abs/2609.04047",                // runs needed
+	"https://arxiv.org/abs/2609.18729",                // API vs consumer app
+	"https://arxiv.org/abs/2607.14447",                // robots.txt compliance
+	"https://arxiv.org/abs/2608.18352",                // AI Mode field experiment
+	"https://www.meltwater.com/en/blog/ai-search-visibility-report-october-2026",
+	"https://ahrefs.com/blog/why-chatgpt-cites-pages/",
+	"https://developers.google.com/search/docs/crawling-indexing/google-common-crawlers",
 }
 
 func TestReportBibliography_Cites2026Sources(t *testing.T) {
@@ -79,11 +129,7 @@ func TestResearchPage_Cites2026SourcesAndAnchorsResolve(t *testing.T) {
 	}
 	digest := researchHTML[strings.Index(researchHTML, `<div class="digest">`):]
 	digest = digest[:strings.Index(digest, "</div>")]
-	for _, c := range retiredClaims {
-		if strings.Contains(digest, c) {
-			t.Errorf("methodology digest still contains retired claim %q", c)
-		}
-	}
+	checkDigest(t, "methodology digest", regexp.MustCompile(`<[^>]+>`).ReplaceAllString(digest, ""))
 	for _, c := range []string{"single most effective", "virtually 0%", "40.1%", "12.47%"} {
 		if strings.Contains(researchHTML, c) {
 			t.Errorf("methodology page still contains retired claim %q", c)
@@ -146,4 +192,26 @@ func TestAnalysisPrompts_NoFormatResidue(t *testing.T) {
 			}
 		}
 	}
+}
+
+// The in-app methodology (App.tsx) carries the same research: a source card
+// for every report source, and the same digest rules.
+func TestInAppMethodology_MatchesReport(t *testing.T) {
+	b, err := os.ReadFile("../frontend/src/App.tsx")
+	if err != nil {
+		t.Skip("frontend source not available:", err)
+	}
+	app := string(b)
+	for _, e := range reportBibliography {
+		if !strings.Contains(app, "url: '"+e.url+"'") {
+			t.Errorf("in-app methodology has no source card for %s (%s)", e.ref, e.url)
+		}
+	}
+	start := strings.Index(app, "Research Digest\n")
+	if start < 0 {
+		t.Fatal("in-app research digest not found")
+	}
+	digest := app[start:]
+	digest = digest[:strings.Index(digest, "</section>")]
+	checkDigest(t, "in-app digest", regexp.MustCompile(`<[^>]+>`).ReplaceAllString(digest, ""))
 }
