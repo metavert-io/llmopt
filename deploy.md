@@ -52,6 +52,10 @@ If you deploy with bare `fly deploy` (uses `Dockerfile` + `fly.toml`), only the 
 
 `fly.saas.toml` sets `auto_stop_machines = "off"`; the app stops itself instead (`backend/idle.go`). It stays up for `LLMOPT_IDLE_SHUTDOWN` (60m) after the last signed-in request, or `LLMOPT_IDLE_SHUTDOWN_VISITOR` (10m) after anonymous visits and boot. It never stops during a request and ignores `/api/health*` and `/health` polls. A request counts as signed-in only when it passed the auth check; for LastSaaS routes, only when it carried a token and LastSaaS answered without an error. A header alone doesn't count. LastSaaS's routes (sign-in, billing, webhooks, admin) reach LastSaaS through llmopt's tracking proxy (`LLMOPT_LASTSAAS_PROXY` on :8092 → `LLMOPT_LASTSAAS_UPSTREAM` :8091), so they count too. Caddy falls back to :8091 directly if the proxy is down (`lb_policy first`). Once it has decided to stop, new requests get a 503 with `Retry-After`; the page retries, and the retry wakes the machine again. Then it sends SIGTERM to its parent supervisord, which exits 0, and the machine stops; the `[[restart]] policy = "on-failure"` keeps it stopped until the proxy starts it on the next request. Look for "Idle shutdown enabled" at startup and "Idle shutdown: ... stopping the machine" when it stops. To go back to Fly's auto-stop, set `auto_stop_machines = "stop"` and remove `LLMOPT_IDLE_SHUTDOWN`.
 
+## Report PDFs
+
+The downloadable report is HTML (`backend/reporttpl/report.html`) printed to PDF by the image's Chromium. The same page is served as a web version. If Chromium can't run, the PDF falls back to the plain gofpdf report, and the log says "Chromium couldn't print the report". PDFs are cached per domain. Bump `reportEngineVersion` in `backend/report_html.go` whenever the template changes, so cached PDFs regenerate.
+
 ## Common Issues
 
 | Symptom | Cause | Fix |

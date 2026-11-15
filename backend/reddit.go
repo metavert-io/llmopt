@@ -400,7 +400,7 @@ func truncate(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return cutAtRune(s, maxLen-3) + "..."
 }
 
 // ── Reddit cache ─────────────────────────────────────────────────────

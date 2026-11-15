@@ -2752,6 +2752,31 @@ export default function App() {
   }, [selectedDomain])
 
   // PDF Report generation
+  // Opens the report as a web page in a new tab. The page needs the user's
+  // sign-in, so it's fetched here and handed to the tab as a blob. The tab is
+  // opened first, before any waiting, so pop-up blockers allow it.
+  const openWebReport = useCallback(() => {
+    if (!selectedDomain) return
+    const tab = window.open('', '_blank')
+    if (tab) {
+      tab.document.title = 'AI Visibility Report'
+      tab.document.body.style.cssText = 'font-family:system-ui,sans-serif;color:#64748b;padding:24px'
+      tab.document.body.textContent = 'Building the report…'
+    }
+    apiFetch(`/api/domains/${encodeURIComponent(selectedDomain)}/report/html`)
+      .then(async r => {
+        const html = await r.text()
+        if (!r.ok) throw new Error(html || `HTTP ${r.status}`)
+        const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }))
+        if (tab) tab.location.href = url
+        else window.open(url, '_blank')
+        setTimeout(() => URL.revokeObjectURL(url), 60000)
+      })
+      .catch((err: Error) => {
+        if (tab) tab.document.body.textContent = `Couldn't build the report: ${err.message}`
+      })
+  }, [selectedDomain])
+
   const generatePDF = useCallback(async () => {
     if (!selectedDomain || pdfGenerating) return
     const controller = new AbortController()
@@ -5000,6 +5025,7 @@ curl -X PATCH \\
               redditAnalysisList.some(r => domainKey(r.domain) === domainKey(selectedDomain)) ||
               searchAnalysisList.some(s => domainKey(s.domain) === domainKey(selectedDomain))
             ) && (
+              <>
               <button
                 onClick={generatePDF}
                 disabled={pdfGenerating}
@@ -5014,6 +5040,16 @@ curl -X PATCH \\
                   </svg>
                 )}
               </button>
+              <button
+                onClick={openWebReport}
+                className="px-2 py-2 rounded-md text-dark-400 hover:text-white transition-all cursor-pointer"
+                title="Open the report as a web page"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                </svg>
+              </button>
+              </>
             )}
             {readOnly && sharedShareId && (
               <a
@@ -5023,6 +5059,19 @@ curl -X PATCH \\
               >
                 <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                   <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                </svg>
+              </a>
+            )}
+            {readOnly && sharedShareId && (
+              <a
+                href={`/api/share/${sharedShareId}/report`}
+                target="_blank"
+                rel="noopener"
+                className="px-2 py-2 rounded-md text-dark-400 hover:text-white transition-all cursor-pointer"
+                title="Open the report as a web page"
+              >
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
                 </svg>
               </a>
             )}

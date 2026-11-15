@@ -2,6 +2,18 @@
 
 ## 2026-11-14
 
+- **Report**: the downloadable report is redesigned. It's built as an HTML page styled like the app and printed to PDF by headless Chromium, which is already in the hosted image for screenshots (`backend/report_html.go`, `backend/reporttpl/report.html`).
+  - **Cover:** the LLM Visibility Score as a ring, with the five dimension cards from the app's scorecard.
+  - **Executive summary:** a scorecard page with a "Top 3 actions" box and key themes as cards.
+  - **Sections:** each opens with its own score cards and a line on what each measures, and the overall LLM Visibility Score (the same number as the app, from one shared function) now appears in the report.
+  - **Charts:** share of voice, LLM Test mention and recommendation rates, every optimized question ranked by score, and the sentiment split.
+  - **Answer optimization:** detailed cards for the 10 weakest questions, the rest in an appendix.
+  - **Recommendations:** cards by priority. Cross-channel actions are shown in full, plus the 15 most important answer fixes from the weakest questions; the rest stay with each question and in the To-Do list.
+  - **Layout:** Inter typeface, page numbers, a clickable table of contents and PDF bookmarks. A real report went from 81 cramped pages of plain text to 39.
+  - **Web version:** the same report opens as a web page from a new button next to the download (`GET /api/domains/{domain}/report/html`), and from public shares (`/api/share/{shareId}/report`).
+  - **Fallbacks:** without Chromium, the PDF falls back to the plain report; `LLMOPT_CHROME_PATH` points at a browser. Cached PDFs record which engine made them, so existing reports regenerate in the new design.
+- **Report**: fixed garbled characters such as "â€”" in the plain PDF (its built-in fonts are Windows-1252; text is now encoded for them rather than written as UTF-8) and fixed to-do summaries ending in "�" (text was cut in the middle of a character; truncation now cuts between characters).
+- **Visibility score**: the YouTube, Reddit, Search and LLM Test parts of the score now use the same tenant scoping as everything else, so a server without SaaS sign-in counts them too.
 - **Navigation**: the tab menu no longer scrolls sideways (with a hidden scrollbar), which hid the download button off the right edge. Everything fits on one row on laptop and desktop screens, and on narrower screens the menu wraps onto further rows instead of scrolling.
 - **Optimize All**: fixed every question being counted as failed. The success check looked only at the last 4KB of each piece of the response, and a real result is a large block that follows the "done" line, so the marker was cut off. Optimizations were being saved all along; only the count and the summary were wrong.
 - **Optimize All**: questions are optimized four at a time instead of one after another, so a domain with 50 questions finishes in roughly a quarter of the time. The button shows how many are done, running and failed, with a reminder to keep the tab open. A question counts as failed when its run ends in an error (these used to be skipped silently). A rate-limited one waits and goes back in the queue. When it finishes it says how many succeeded and failed, and clicking Optimize All again retries the rest.
