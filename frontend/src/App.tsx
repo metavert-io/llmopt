@@ -4847,7 +4847,8 @@ curl -X PATCH \\
 
         {/* Tab Navigation — Domain List + tab pills */}
         <div className="flex justify-center mb-6 px-2">
-          <div className="inline-flex items-center bg-dark-900/50 border border-dark-800 rounded-lg p-1 gap-1 max-w-full overflow-x-auto scrollbar-hide">
+          {/* No scrolling inside the menu: everything fits, wrapping to a second row on narrow screens. */}
+          <div className="flex flex-wrap items-center justify-center bg-dark-900/50 border border-dark-800 rounded-lg p-1 gap-1 max-w-full">
             {/* Back button — shown when viewing a report, navigates to default home view */}
             {selectedDomain && (
               <button
@@ -4912,7 +4913,7 @@ curl -X PATCH \\
                 }
                 activeTab === 'brand' && brandEditing ? guardBrandNav(doSwitch) : doSwitch()
               }}
-              className={`px-5 py-2 rounded-md text-sm font-medium transition-all cursor-pointer shrink-0 ${
+              className={`px-3 py-2 rounded-md text-sm font-medium transition-all cursor-pointer shrink-0 ${
                 activeTab === 'analyze'
                   ? 'bg-primary-600 text-white'
                   : 'text-dark-400 hover:text-white'
@@ -4934,7 +4935,7 @@ curl -X PATCH \\
                       setActiveTab(tab)
                     }
                   }}
-                  className={`px-5 py-2 rounded-md text-sm font-medium transition-all relative flex items-center gap-2 shrink-0 ${
+                  className={`px-3 py-2 rounded-md text-sm font-medium transition-all relative flex items-center gap-2 shrink-0 ${
                     disabled
                       ? 'text-dark-600 cursor-not-allowed'
                       : activeTab === tab
