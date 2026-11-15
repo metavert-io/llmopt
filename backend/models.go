@@ -812,6 +812,11 @@ type ReportFingerprint struct {
 	SummaryGeneratedAt   *time.Time `json:"summary_generated_at,omitempty" bson:"summaryGeneratedAt,omitempty"`
 	SearchGeneratedAt    *time.Time `json:"search_generated_at,omitempty" bson:"searchGeneratedAt,omitempty"`
 	LatestTodoAt         *time.Time `json:"latest_todo_at,omitempty" bson:"latestTodoAt,omitempty"`
+	// The latest LLM Test, the latest advice update (guidance_refresh.go) and
+	// the open to-do count, so a new test or updated advice regenerates the PDF.
+	LLMTestGeneratedAt *time.Time `json:"llm_test_generated_at,omitempty" bson:"llmTestGeneratedAt,omitempty"`
+	GuidanceRevisedAt  *time.Time `json:"guidance_revised_at,omitempty" bson:"guidanceRevisedAt,omitempty"`
+	OpenTodoCount      int        `json:"open_todo_count,omitempty" bson:"openTodoCount,omitempty"`
 	OptimizationCount    int        `json:"optimization_count" bson:"optimizationCount"`
 	AnalysisExists       bool       `json:"analysis_exists" bson:"analysisExists"`
 	VideoExists          bool       `json:"video_exists" bson:"videoExists"`
