@@ -5783,14 +5783,14 @@ Evaluate:
 - Quotability: standalone citable statements?
 - Statistical evidence: specific numbers/benchmarks?
 - Information density: focused vs. rambling?
-- Front-loading: key claims in first 20%%%% of transcript?
+- Front-loading: key claims in first 20%% of transcript?
 - Entity explicitness: brand name spoken clearly?
 - CRITICAL: No transcript = cap contribution at 10.
 
 Also produce a scorecard for EACH own-channel video:
-- transcript_power (45%%%%): spoken content quality as LLM training data
-- structural_extractability (30%%%%): how easily LLMs can parse it
-- discovery_surface (25%%%%): findability by AI retrieval
+- transcript_power (45%%): spoken content quality as LLM training data
+- structural_extractability (30%%): how easily LLMs can parse it
+- discovery_surface (25%%): findability by AI retrieval
 - overall_score = transcript_power * 0.45 + structural_extractability * 0.30 + discovery_surface * 0.25
 
 Return ONLY valid JSON:
@@ -5818,7 +5818,7 @@ Analyze ALL video data above for TOPICAL DOMINANCE — how comprehensively the b
 Evaluate:
 - Topics covered vs. total topics in the space
 - Coverage depth: surface mentions vs. in-depth treatment
-- Share of voice: %%%% of videos mentioning each brand
+- Share of voice: %% of videos mentioning each brand
 - Content gaps: topics where competitors are present but %s is absent (score each 0-100)
 - First-mover opportunities in unclaimed territory
 
@@ -5875,7 +5875,7 @@ AI answers often misstate their sources — 11%% of AI Overview claims weren't s
 Evaluate:
 - For brand mentions: sentiment, mention_context (recommendation/tutorial/comparison/complaint/passing), mention_position (early/middle/late), extractability (high/medium/low)
 - Weight early + high-extractability mentions higher (U-shaped attention)
-- Apply 30%%%% confidence discount for LLM narrative divergence
+- Apply 30%% confidence discount for LLM narrative divergence
 - Narrative coherence: consistent or contradictory?
 - Vulnerability assessment: negative patterns LLMs would amplify?
 

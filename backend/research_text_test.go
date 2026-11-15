@@ -126,3 +126,24 @@ func TestAnalysisPrompts_NoRetiredClaims(t *testing.T) {
 		t.Error("reddit prompt should say Reddit's citation share fell")
 	}
 }
+
+// The analysis prompts are formatted once, so they must not show the model
+// a doubled "%%" or a formatting error.
+func TestAnalysisPrompts_NoFormatResidue(t *testing.T) {
+	p := videoContextParams{BrandName: "Brand"}
+	for name, s := range map[string]string{
+		"reddit":    buildRedditAuthorityPrompt("brand.example", nil, nil, nil, BrandContextInfo{}),
+		"search":    buildSearchVisibilityPrompt("brand.example", BrandContextInfo{}, nil, nil, nil),
+		"video 1":   buildPillar1Prompt(p),
+		"video 2":   buildPillar2Prompt(p),
+		"video 3":   buildPillar3Prompt(p),
+		"video 4":   buildPillar4Prompt(p),
+		"synthesis": buildSynthesisPrompt("Brand", "{}", "{}", "{}", "{}"),
+	} {
+		for _, bad := range []string{"%!", "%%"} {
+			if i := strings.Index(s, bad); i >= 0 {
+				t.Errorf("%s: %q near %q", name, bad, s[max(0, i-70):min(len(s), i+15)])
+			}
+		}
+	}
+}
