@@ -2,6 +2,14 @@
 
 ## 2026-11-14
 
+- **Scoring (2026 research)**: scores follow the 2026 research, and the new weights apply to every saved analysis as it's read, so all pages, shared pages, the API, a regenerated executive summary and the report show the new scoring without re-running anything (`backend/scoring.go`).
+  - **LLM Visibility Score:** Optimization 25%, Video 20%, Reddit 15%, Search 15%, LLM Test 25% (was 30/20/20/15/15). The LLM Test, the only measure of what assistants actually answer, weighs as much as answer optimization; Reddit's share of AI citations fell in 2026.
+  - **Search Visibility:** AI Overview Readiness 25%, Crawl Accessibility 20%, Brand Momentum 30%, Content Freshness 25% (was 30/20/25/25); with Category Discovery 20/15/25/20/20 (was 25/15/20/20/20). The overall is now always the weighted average of the pillars.
+  - **Schema** counts little in AI Overview readiness (no measurable citation lift in 2026 tests), and **blocking training crawlers** (GPTBot, ClaudeBot) no longer costs points, while blocking the crawlers that fetch pages for AI answers (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot, Googlebot, Bingbot) caps the crawl score. Saved analyses get these as adjustments to the model's own pillar scores; new ones check the search crawlers directly.
+  - Results record the rubric they were scored with (`rubric_version`). A search result from before shows that it was re-weighted, and an executive summary written before is marked out of date with a Regenerate button. The report cache regenerates PDFs.
+  - The four copies of the LLM Visibility Score calculation (app, API, shared page, SEO page) are now one function.
+- **Executive summary**: now also covers Search Visibility, the LLM Test and the LLM Visibility Score with its weights, which it used to leave out. A newer search analysis or LLM Test marks it out of date.
+- **Search history**: the list of search analyses showed no score (it read a field name that doesn't exist).
 - **Models**: analyses and answer optimization now run on Claude Opus 5.5 (Sonnet 5.5 when Opus is overloaded) instead of Sonnet 4.6. The status page probes Opus 5.5.
 - **Out of credit**: when the AI provider account behind your API key is out of credit, the app says so ("Your AI provider account is out of credit, so this can't run…", with where to add credit) instead of calling it "an upstream provider issue". Every provider's streaming calls now read a 429 before deciding: insufficient quota or billing is out of credit, and only a real rate limit counts as "overloaded". Optimize All stops at the first out-of-credit error and says how many questions it finished, instead of failing through the rest.
 - **Report**: the downloadable report is redesigned. It's built as an HTML page styled like the app and printed to PDF by headless Chromium, which is already in the hosted image for screenshots (`backend/report_html.go`, `backend/reporttpl/report.html`).

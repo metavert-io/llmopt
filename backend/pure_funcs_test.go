@@ -134,7 +134,7 @@ func TestExtractVideoID_Invalid(t *testing.T) {
 // ── buildDomainSummaryPrompt ──────────────────────────────────────────────────
 
 func TestBuildDomainSummaryPrompt_Basic(t *testing.T) {
-	prompt := buildDomainSummaryPrompt("summary-test.com", nil, nil, nil, nil, BrandContextInfo{Used: false})
+	prompt := buildDomainSummaryPrompt("summary-test.com", nil, nil, nil, nil, summaryExtras{}, BrandContextInfo{Used: false})
 	if !strings.Contains(prompt, "summary-test.com") {
 		t.Error("expected domain in domain summary prompt")
 	}
@@ -148,7 +148,7 @@ func TestBuildDomainSummaryPrompt_WithBrandInfo(t *testing.T) {
 		Used:          true,
 		ContextString: "Company: SummaryBrand\nCategory: Analytics",
 	}
-	prompt := buildDomainSummaryPrompt("summary-brand.com", nil, nil, nil, nil, brandInfo)
+	prompt := buildDomainSummaryPrompt("summary-brand.com", nil, nil, nil, nil, summaryExtras{}, brandInfo)
 	if !strings.Contains(prompt, "SummaryBrand") {
 		t.Error("expected brand name in prompt")
 	}
@@ -161,7 +161,7 @@ func TestBuildDomainSummaryPrompt_WithAnalysis(t *testing.T) {
 			SiteSummary: "A great SaaS platform with excellent coverage.",
 		},
 	}
-	prompt := buildDomainSummaryPrompt("summary-brand.com", nil, analysis, nil, nil, BrandContextInfo{Used: false})
+	prompt := buildDomainSummaryPrompt("summary-brand.com", nil, analysis, nil, nil, summaryExtras{}, BrandContextInfo{Used: false})
 	if !strings.Contains(prompt, "A great SaaS platform") {
 		t.Error("expected analysis site summary in prompt")
 	}

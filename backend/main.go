@@ -2393,6 +2393,7 @@ Be specific and evidence-based in your scoring. Reference actual content you fou
 					sendSSE(w, flusher, "done", map[string]string{"result": result.ResultJSON})
 					return
 				}
+				optResult.RubricVersion = scoringRubricVersion
 
 				opt := Optimization{
 					AnalysisID:            analysisOID,
@@ -3282,116 +3283,14 @@ func handleGetSharedDomain(mongoDB *MongoDB) http.HandlerFunc {
 			return nil
 		})
 
-		// Compute visibility score for the shared view
+		// Compute visibility score for the shared view (weights: scoring.go)
 		g.Go(func() error {
-			type vsComponent struct {
-				Name      string  `json:"name"`
-				Score     int     `json:"score"`
-				Weight    float64 `json:"weight"`
-				Available bool    `json:"available"`
-			}
-			components := []vsComponent{
-				{Name: "Optimization", Weight: 0.30},
-				{Name: "Video Authority", Weight: 0.20},
-				{Name: "Reddit Authority", Weight: 0.20},
-				{Name: "Search Visibility", Weight: 0.15},
-				{Name: "LLM Test", Weight: 0.15},
-			}
-			td := bson.D{{Key: "tenantId", Value: ds.TenantID}, {Key: "domain", Value: ds.Domain}}
-
-			// Optimization average
-			cur, err := mongoDB.Optimizations().Find(gctx, td,
-				options.Find().SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}))
-			if err == nil {
-				var opts []struct {
-					Result struct {
-						OverallScore int `bson:"overallScore"`
-					} `bson:"result"`
-				}
-				if cur.All(gctx, &opts) == nil && len(opts) > 0 {
-					total := 0
-					for _, o := range opts {
-						total += o.Result.OverallScore
-					}
-					components[0].Score = total / len(opts)
-					components[0].Available = true
-				}
-			}
-
-			// Video authority
-			var vaScore struct {
-				Result *struct {
-					OverallScore int `bson:"overallScore"`
-				} `bson:"result"`
-			}
-			if mongoDB.VideoAnalyses().FindOne(gctx, td,
-				options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-			).Decode(&vaScore) == nil && vaScore.Result != nil {
-				components[1].Score = vaScore.Result.OverallScore
-				components[1].Available = true
-			}
-
-			// Reddit authority
-			var raScore struct {
-				Result *struct {
-					OverallScore int `bson:"overallScore"`
-				} `bson:"result"`
-			}
-			if mongoDB.RedditAnalyses().FindOne(gctx, td,
-				options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-			).Decode(&raScore) == nil && raScore.Result != nil {
-				components[2].Score = raScore.Result.OverallScore
-				components[2].Available = true
-			}
-
-			// Search visibility
-			var saScore struct {
-				Result *struct {
-					OverallScore int `bson:"overallScore"`
-				} `bson:"result"`
-			}
-			if mongoDB.SearchAnalyses().FindOne(gctx, td,
-				options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-			).Decode(&saScore) == nil && saScore.Result != nil {
-				components[3].Score = saScore.Result.OverallScore
-				components[3].Available = true
-			}
-
-			// LLM Test
-			var ltScore struct {
-				OverallScore int `bson:"overallScore"`
-			}
-			if mongoDB.LLMTests().FindOne(gctx,
-				bson.D{
-					{Key: "domain", Value: ds.Domain},
-					{Key: "tenantId", Value: ds.TenantID},
-					{Key: "competitorOf", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}},
-				},
-				options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "overallScore", Value: 1}}),
-			).Decode(&ltScore) == nil {
-				components[4].Score = ltScore.OverallScore
-				components[4].Available = true
-			}
-
-			totalWeight := 0.0
-			weightedSum := 0.0
-			availableCount := 0
-			for _, c := range components {
-				if c.Available {
-					totalWeight += c.Weight
-					weightedSum += float64(c.Score) * c.Weight
-					availableCount++
-				}
-			}
-			score := 0
-			if totalWeight > 0 {
-				score = int(weightedSum / totalWeight)
-			}
+			vs := visibilityScoreFor(gctx, mongoDB, bson.D{{Key: "tenantId", Value: ds.TenantID}, {Key: "domain", Value: ds.Domain}})
 			visibilityScore = map[string]any{
-				"score":      score,
-				"components": components,
-				"available":  availableCount,
-				"total":      len(components),
+				"score":      vs.Score,
+				"components": vs.Components,
+				"available":  vs.Available,
+				"total":      vs.Total,
 			}
 			return nil
 		})
@@ -4189,8 +4088,31 @@ func handleDeleteOptimization(mongoDB *MongoDB) http.HandlerFunc {
 
 // Domain Summary handlers
 
-func buildDomainSummaryPrompt(domain string, optimizations []Optimization, analysis *Analysis, videoAnalysis *VideoAnalysis, redditAnalysis *RedditAnalysis, brandInfo BrandContextInfo) string {
+// summaryExtras are the parts of the executive summary's input beyond the
+// per-report summaries: search visibility, the LLM Test and the LLM
+// Visibility Score with its current weights.
+type summaryExtras struct {
+	Search     *SearchAnalysis
+	LLMTest    *LLMTest
+	Visibility *visibilityScore
+}
+
+func buildDomainSummaryPrompt(domain string, optimizations []Optimization, analysis *Analysis, videoAnalysis *VideoAnalysis, redditAnalysis *RedditAnalysis, extras summaryExtras, brandInfo BrandContextInfo) string {
 	var sections strings.Builder
+
+	// LLM Visibility Score with the current weights (scoring.go)
+	if v := extras.Visibility; v != nil && v.Available > 0 {
+		sections.WriteString("\n=== LLM VISIBILITY SCORE ===\n")
+		sections.WriteString(fmt.Sprintf("Overall: %d/100, weighted over the %d of %d dimensions that have been run:\n", v.Score, v.Available, v.Total))
+		for _, c := range v.Components {
+			if c.Available {
+				sections.WriteString(fmt.Sprintf("- %s: %d/100 (weight %d%%)\n", c.Name, c.Score, int(c.Weight*100+0.5)))
+			} else {
+				sections.WriteString(fmt.Sprintf("- %s: not run (weight %d%%)\n", c.Name, int(c.Weight*100+0.5)))
+			}
+		}
+		sections.WriteString("Weights follow 2026 research: the LLM Test (what assistants actually answer) and answer optimization weigh most; Reddit less, as its share of AI citations fell in 2026.\n")
+	}
 
 	// Site Analysis (summary only)
 	if analysis != nil {
@@ -4233,6 +4155,31 @@ func buildDomainSummaryPrompt(domain string, optimizations []Optimization, analy
 		}
 	}
 
+	// Search Visibility (scores with the current weights + executive summary)
+	if extras.Search != nil && extras.Search.Result != nil {
+		sr := extras.Search.Result
+		sections.WriteString("\n=== SEARCH VISIBILITY ===\n")
+		sections.WriteString(fmt.Sprintf("Overall Search Visibility Score: %d/100 — AI Overview Readiness: %d, Crawl Accessibility: %d, Brand Momentum: %d, Content Freshness: %d",
+			sr.OverallScore, sr.AIOReadiness.Score, sr.CrawlAccess.Score, sr.BrandMomentum.Score, sr.ContentFreshness.Score))
+		if sr.CategoryDiscovery != nil {
+			sections.WriteString(fmt.Sprintf(", Category Discovery: %d", sr.CategoryDiscovery.Score))
+		}
+		sections.WriteString("\n")
+		if sr.ExecutiveSummary != "" {
+			sections.WriteString("Summary: " + sr.ExecutiveSummary + "\n")
+		}
+	}
+
+	// LLM Test (what the assistants answered)
+	if t := extras.LLMTest; t != nil && len(t.ProviderSummaries) > 0 {
+		sections.WriteString("\n=== LLM TEST (answers from AI assistants) ===\n")
+		sections.WriteString(fmt.Sprintf("Overall LLM Test Score: %d/100 over %d queries\n", t.OverallScore, len(t.Queries)))
+		for _, p := range t.ProviderSummaries {
+			sections.WriteString(fmt.Sprintf("- %s: %d/100 (mentioned in %d%%, recommended in %d%%, accurate in %d%%)\n",
+				p.ProviderName, p.OverallScore, p.MentionRate, p.RecommendRate, p.AccuracyRate))
+		}
+	}
+
 	brandSection := ""
 	if brandInfo.Used && brandInfo.ContextString != "" {
 		brandSection = fmt.Sprintf("\n--- Brand Intelligence Context ---\n%s\n--- End Brand Context ---\n", brandInfo.ContextString)
@@ -4252,6 +4199,12 @@ func buildDomainSummaryPrompt(domain string, optimizations []Optimization, analy
 	if redditAnalysis != nil && redditAnalysis.Result != nil {
 		included = append(included, "Reddit Authority")
 	}
+	if extras.Search != nil && extras.Search.Result != nil {
+		included = append(included, "Search Visibility")
+	}
+	if extras.LLMTest != nil && len(extras.LLMTest.ProviderSummaries) > 0 {
+		included = append(included, "LLM Test")
+	}
 
 	return fmt.Sprintf(`You are an LLM visibility strategist. You are given high-level summaries and scores from multiple report types for a single domain. Synthesize these into a unified strategic overview.
 
@@ -4260,9 +4213,9 @@ Reports Included: %s
 %s%s
 INSTRUCTIONS:
 
-1. **Executive Summary**: Write a 2-3 paragraph strategic overview of this domain's LLM visibility position across all available channels. Cover the biggest strengths, weaknesses, and overall trajectory. Weave together findings from all report types present.
+1. **Executive Summary**: Write a 2-3 paragraph strategic overview of this domain's LLM visibility position across all available channels. Cover the biggest strengths, weaknesses, and overall trajectory. Weave together findings from all report types present. When the LLM Visibility Score is given, quote it and weigh the channels by its weights; treat the LLM Test as the direct evidence of what assistants say today.
 
-2. **Themes**: Identify 3-5 recurring patterns across the reports. Reference sources by label (e.g., "Optimization Report 3", "Video Authority", "Reddit Authority", "Site Analysis"). Themes should span report types when possible.
+2. **Themes**: Identify 3-5 recurring patterns across the reports. Reference sources by label (e.g., "Optimization Report 3", "Video Authority", "Reddit Authority", "Search Visibility", "LLM Test", "Site Analysis"). Themes should span report types when possible.
 
 3. **Priority Action Items**: Based on the score patterns and summaries, recommend 5-10 prioritized actions. Use priority levels: high, medium, low.
 
@@ -4335,7 +4288,18 @@ func isSummaryStale(ctx context.Context, mongoDB *MongoDB, tenantCtx context.Con
 		}
 	}
 
-	return false, 0
+	// Newer search analysis or LLM Test (not a competitor test)
+	newer := bson.E{Key: "generatedAt", Value: bson.D{{Key: "$gt", Value: summary.GeneratedAt}}}
+	if n, _ := mongoDB.SearchAnalyses().CountDocuments(ctx, append(append(bson.D{}, domainFilter...), newer)); n > 0 {
+		return true, 0
+	}
+	if n, _ := mongoDB.LLMTests().CountDocuments(ctx, append(append(bson.D{}, domainFilter...), newer,
+		bson.E{Key: "competitorOf", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}})); n > 0 {
+		return true, 0
+	}
+
+	// Written before the current scoring weights (scoring.go)
+	return summary.RubricVersion < scoringRubricVersion, 0
 }
 
 func handleDomainSummaryStatus(mongoDB *MongoDB) http.HandlerFunc {
@@ -4405,6 +4369,8 @@ func handleGetDomainSummary(mongoDB *MongoDB) http.HandlerFunc {
 			"summary":            summary,
 			"stale":              stale,
 			"newer_report_count": newerCount,
+			// Written before the current scoring weights (scoring.go)
+			"rescored": summary.RubricVersion < scoringRubricVersion,
 		})
 	}
 }
@@ -4489,10 +4455,33 @@ func handleGenerateDomainSummary(mongoDB *MongoDB, encKey []byte, fallbackKey st
 		}
 		raCancel()
 
+		// Search analysis (rescored on read), latest LLM Test, and the LLM
+		// Visibility Score with the current weights.
+		var extras summaryExtras
+		exCtx, exCancel := context.WithTimeout(r.Context(), 15*time.Second)
+		own := func(extra ...bson.E) bson.D {
+			return append(tenantFilter(r.Context(), bson.D{{Key: "domain", Value: domain}}), extra...)
+		}
+		latestNoRaw := options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "rawText", Value: 0}})
+		var sa SearchAnalysis
+		if mongoDB.SearchAnalyses().FindOne(exCtx, own(), latestNoRaw).Decode(&sa) == nil && sa.Result != nil {
+			extras.Search = &sa
+		}
+		var lt LLMTest
+		if mongoDB.LLMTests().FindOne(exCtx, own(bson.E{Key: "competitorOf", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}}),
+			options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}})).Decode(&lt) == nil && len(lt.ProviderSummaries) > 0 {
+			extras.LLMTest = &lt
+		}
+		vs := computeVisibilityScore(exCtx, mongoDB, domain, r.Context())
+		extras.Visibility = &vs
+		exCancel()
+
 		hasVideo := videoAnalysis != nil && videoAnalysis.Result != nil
 		hasReddit := redditAnalysis != nil && redditAnalysis.Result != nil
+		hasSearch := extras.Search != nil
+		hasLLMTest := extras.LLMTest != nil
 
-		if len(optimizations) == 0 && analysis == nil && !hasVideo && !hasReddit {
+		if len(optimizations) == 0 && analysis == nil && !hasVideo && !hasReddit && !hasSearch && !hasLLMTest {
 			sendSSE(w, flusher, "error", map[string]string{"message": "No reports found for this domain"})
 			return
 		}
@@ -4513,11 +4502,17 @@ func handleGenerateDomainSummary(mongoDB *MongoDB, encKey []byte, fallbackKey st
 		if hasReddit {
 			parts = append(parts, "Reddit authority")
 		}
+		if hasSearch {
+			parts = append(parts, "search visibility")
+		}
+		if hasLLMTest {
+			parts = append(parts, "LLM Test")
+		}
 		sendSSE(w, flusher, "status", map[string]string{
 			"message": fmt.Sprintf("Synthesizing %s for %s...", strings.Join(parts, ", "), domain),
 		})
 
-		prompt := buildDomainSummaryPrompt(domain, optimizations, analysis, videoAnalysis, redditAnalysis, brandInfo)
+		prompt := buildDomainSummaryPrompt(domain, optimizations, analysis, videoAnalysis, redditAnalysis, extras, brandInfo)
 
 		models := provider.Models()
 
@@ -4588,6 +4583,9 @@ func handleGenerateDomainSummary(mongoDB *MongoDB, encKey []byte, fallbackKey st
 					IncludesAnalysis: analysis != nil,
 					IncludesVideo:    hasVideo,
 					IncludesReddit:   hasReddit,
+					IncludesSearch:   hasSearch,
+					IncludesLLMTest:  hasLLMTest,
+					RubricVersion:    scoringRubricVersion,
 					GeneratedAt:      time.Now(),
 				}
 
@@ -6369,6 +6367,8 @@ func handleVideoAnalyze(mongoDB *MongoDB, encKey []byte, fallbackKey string, saa
 			}
 		}
 
+		result.RubricVersion = scoringRubricVersion
+
 		// Marshal the final result for storage
 		resultBytes, _ := json.Marshal(result)
 		resultJSON := string(resultBytes)
@@ -7036,6 +7036,7 @@ func handleRedditAnalyze(mongoDB *MongoDB, encKey []byte, fallbackKey string, sa
 			saveFailedAnalysis(mongoDB, r.Context(), req.Domain, "reddit", ErrCodeParseError, usedModel)
 			return
 		}
+		result.RubricVersion = scoringRubricVersion
 
 		sendSSE(w, flusher, "status", map[string]string{
 			"message": fmt.Sprintf("Analysis complete — Overall Score: %d/100", result.OverallScore),
@@ -7483,7 +7484,7 @@ Search visibility affects AI citation through two distinct pathways:
 
 Using the web_search tool, conduct a comprehensive search visibility analysis of %s. You must:
 
-1. **Visit the site's robots.txt** — search for "%s robots.txt" and/or try to access it directly. Identify which AI crawlers are explicitly allowed or disallowed (GPTBot, ClaudeBot, PerplexityBot, Googlebot, and their SearchBot/User variants).
+1. **Visit the site's robots.txt** — search for "%s robots.txt" and/or try to access it directly. Identify which crawlers are explicitly allowed or disallowed. Separate the crawlers that fetch pages for AI answers and search (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot, Googlebot, Bingbot) from the training crawlers (GPTBot, ClaudeBot) and Google-Extended (Gemini training and grounding). Blocking training crawlers is a business choice, not a visibility problem; blocking search crawlers hides the site from AI answers. Note whether the site is behind Cloudflare, whose default AI-bot blocking can block crawlers the robots.txt allows.
 
 2. **Check for structured data** — Visit key pages of the site and check for Schema.org markup (JSON-LD), OpenGraph tags, structured content (tables, FAQ sections, comparison formats).
 
@@ -7511,13 +7512,8 @@ Using the web_search tool, conduct a comprehensive search visibility analysis of
 		}
 	}
 
-	// Weights depend on whether category discovery is included
-	aioW, crawlW, momentumW, freshnessW := "30%", "20%", "25%", "25%"
-	weightLine := "AIO Readiness 30%, Crawl Accessibility 20%, Brand Momentum 25%, Content Freshness 25%"
-	if hasCategories {
-		aioW, crawlW, momentumW, freshnessW = "25%", "15%", "20%", "20%"
-		weightLine = "AIO Readiness 25%, Crawl Accessibility 15%, Brand Momentum 20%, Content Freshness 20%, Category Discovery 20%"
-	}
+	// Weights depend on whether category discovery is included (scoring.go)
+	aioW, crawlW, momentumW, freshnessW, weightLine := searchPromptWeights(hasCategories)
 
 	sb.WriteString(fmt.Sprintf(`
 Return your analysis as a JSON object with this exact structure:
@@ -7528,7 +7524,7 @@ Return your analysis as a JSON object with this exact structure:
     "score": <0-100 integer, weighted %s>,
     "evidence": ["specific finding 1", "specific finding 2", ...],
     "organic_presence": <0-100>,
-    "structured_data": <0-100>,
+    "structured_data": <0-100, informational: schema shows no measurable AI citation lift, so it counts little>,
     "content_format": <0-100>,
     "answer_prominence": <0-100>
   },
@@ -7536,15 +7532,19 @@ Return your analysis as a JSON object with this exact structure:
     "score": <0-100 integer, weighted %s>,
     "evidence": ["specific finding 1", "specific finding 2", ...],
     "robots_txt_policy": "<summary of robots.txt AI crawler policy>",
-    "ai_bot_access": <0-100>,
+    "ai_bot_access": <0-100, access for the crawlers that serve AI answers and search; training crawlers don't count>,
     "sitemap_quality": <0-100>,
     "render_accessibility": <0-100>,
     "crawler_details": [
-      {"name": "GPTBot", "allowed": true/false, "notes": "..."},
-      {"name": "ClaudeBot", "allowed": true/false, "notes": "..."},
+      {"name": "OAI-SearchBot", "allowed": true/false, "notes": "..."},
+      {"name": "ChatGPT-User", "allowed": true/false, "notes": "..."},
+      {"name": "Claude-SearchBot", "allowed": true/false, "notes": "..."},
       {"name": "PerplexityBot", "allowed": true/false, "notes": "..."},
+      {"name": "Googlebot", "allowed": true/false, "notes": "..."},
+      {"name": "Bingbot", "allowed": true/false, "notes": "..."},
       {"name": "Google-Extended", "allowed": true/false, "notes": "..."},
-      {"name": "Googlebot", "allowed": true/false, "notes": "..."}
+      {"name": "GPTBot", "allowed": true/false, "notes": "training crawler"},
+      {"name": "ClaudeBot", "allowed": true/false, "notes": "training crawler"}
     ]
   },
   "brand_momentum": {
@@ -7763,6 +7763,9 @@ func handleSearchAnalyze(mongoDB *MongoDB, encKey []byte, fallbackKey string, sa
 			saveFailedAnalysis(mongoDB, r.Context(), req.Domain, "search", ErrCodeParseError, usedModel)
 			return
 		}
+		// The model's pillar parts, weighed with the current weights (scoring.go).
+		result.RubricVersion = scoringRubricVersion
+		result.rescore()
 
 		sendSSE(w, flusher, "status", map[string]string{
 			"message": fmt.Sprintf("Analysis complete — Overall Score: %d/100", result.OverallScore),
@@ -7876,12 +7879,11 @@ func handleListSearchAnalyses(mongoDB *MongoDB) http.HandlerFunc {
 		filter := tenantFilter(r.Context(), bson.D{})
 		opts := options.Find().
 			SetSort(bson.D{{Key: "generatedAt", Value: -1}}).
-			SetProjection(bson.D{
+			SetProjection(append(bson.D{
 				{Key: "domain", Value: 1},
-				{Key: "result.overall_score", Value: 1},
 				{Key: "model", Value: 1},
 				{Key: "generatedAt", Value: 1},
-			})
+			}, searchScoreProjection("result.")...))
 
 		cursor, err := mongoDB.SearchAnalyses().Find(ctx, filter, opts)
 		if err != nil {
@@ -7895,9 +7897,7 @@ func handleListSearchAnalyses(mongoDB *MongoDB) http.HandlerFunc {
 			var doc struct {
 				ID          primitive.ObjectID `bson:"_id"`
 				Domain      string             `bson:"domain"`
-				Result      *struct {
-					OverallScore int `bson:"overallScore"`
-				} `bson:"result"`
+				Result      *SearchVisibilityResult `bson:"result"` // rescored on decode
 				Model       string    `bson:"model"`
 				GeneratedAt time.Time `bson:"generatedAt"`
 			}

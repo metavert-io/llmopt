@@ -348,7 +348,7 @@ func TestBuildDomainSummaryPrompt(t *testing.T) {
 				Questions:    []Question{{Question: "What is it?"}},
 			},
 		}
-		prompt := buildDomainSummaryPrompt("example.com", nil, analysis, nil, nil, BrandContextInfo{})
+		prompt := buildDomainSummaryPrompt("example.com", nil, analysis, nil, nil, summaryExtras{}, BrandContextInfo{})
 		if !strings.Contains(prompt, "example.com") {
 			t.Error("prompt should contain domain")
 		}
@@ -364,7 +364,7 @@ func TestBuildDomainSummaryPrompt(t *testing.T) {
 		opts := []Optimization{
 			{Question: "How to improve?", Result: OptimizationResult{OverallScore: 70}},
 		}
-		prompt := buildDomainSummaryPrompt("test.com", opts, nil, nil, nil, BrandContextInfo{})
+		prompt := buildDomainSummaryPrompt("test.com", opts, nil, nil, nil, summaryExtras{}, BrandContextInfo{})
 		if !strings.Contains(prompt, "OPTIMIZATION REPORTS") {
 			t.Error("prompt should contain optimization section")
 		}
@@ -372,7 +372,7 @@ func TestBuildDomainSummaryPrompt(t *testing.T) {
 
 	t.Run("with_brand_context", func(t *testing.T) {
 		brandInfo := BrandContextInfo{Used: true, ContextString: "Brand: Test Corp"}
-		prompt := buildDomainSummaryPrompt("test.com", nil, nil, nil, nil, brandInfo)
+		prompt := buildDomainSummaryPrompt("test.com", nil, nil, nil, nil, summaryExtras{}, brandInfo)
 		if !strings.Contains(prompt, "Brand Intelligence Context") {
 			t.Error("prompt should include brand context")
 		}

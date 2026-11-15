@@ -26,7 +26,7 @@ import (
 // ── buildDomainSummaryPrompt ──────────────────────────────────────────────
 
 func TestBuildDomainSummaryPrompt_NilData(t *testing.T) {
-	prompt := buildDomainSummaryPrompt("nil-test.com", nil, nil, nil, nil, BrandContextInfo{})
+	prompt := buildDomainSummaryPrompt("nil-test.com", nil, nil, nil, nil, summaryExtras{}, BrandContextInfo{})
 	if !strings.Contains(prompt, "nil-test.com") {
 		t.Error("prompt should contain domain name")
 	}
@@ -40,7 +40,7 @@ func TestBuildDomainSummaryPrompt_WithAnalysisFull(t *testing.T) {
 			Questions:    []Question{{Question: "What does example do?"}},
 		},
 	}
-	prompt := buildDomainSummaryPrompt("example.com", nil, analysis, nil, nil, BrandContextInfo{})
+	prompt := buildDomainSummaryPrompt("example.com", nil, analysis, nil, nil, summaryExtras{}, BrandContextInfo{})
 	if !strings.Contains(prompt, "SITE ANALYSIS") {
 		t.Error("prompt should contain SITE ANALYSIS section")
 	}
@@ -72,7 +72,7 @@ func TestBuildDomainSummaryPrompt_WithOptimizations(t *testing.T) {
 			},
 		},
 	}
-	prompt := buildDomainSummaryPrompt("example.com", optimizations, nil, nil, nil, BrandContextInfo{})
+	prompt := buildDomainSummaryPrompt("example.com", optimizations, nil, nil, nil, summaryExtras{}, BrandContextInfo{})
 	if !strings.Contains(prompt, "OPTIMIZATION REPORTS") {
 		t.Error("prompt should contain OPTIMIZATION REPORTS section")
 	}
@@ -88,7 +88,7 @@ func TestBuildDomainSummaryPrompt_WithVideo(t *testing.T) {
 			ExecutiveSummary: "Good YouTube presence.",
 		},
 	}
-	prompt := buildDomainSummaryPrompt("example.com", nil, nil, videoAnalysis, nil, BrandContextInfo{})
+	prompt := buildDomainSummaryPrompt("example.com", nil, nil, videoAnalysis, nil, summaryExtras{}, BrandContextInfo{})
 	if !strings.Contains(prompt, "YOUTUBE VIDEO AUTHORITY") {
 		t.Error("prompt should contain VIDEO AUTHORITY section")
 	}
@@ -97,7 +97,7 @@ func TestBuildDomainSummaryPrompt_WithVideo(t *testing.T) {
 func TestBuildDomainSummaryPrompt_VideoNilResult(t *testing.T) {
 	// VideoAnalysis with nil Result should NOT include the video section
 	videoAnalysis := &VideoAnalysis{Result: nil}
-	prompt := buildDomainSummaryPrompt("example.com", nil, nil, videoAnalysis, nil, BrandContextInfo{})
+	prompt := buildDomainSummaryPrompt("example.com", nil, nil, videoAnalysis, nil, summaryExtras{}, BrandContextInfo{})
 	if strings.Contains(prompt, "YOUTUBE VIDEO AUTHORITY") {
 		t.Error("prompt should NOT contain VIDEO section when Result is nil")
 	}
@@ -110,7 +110,7 @@ func TestBuildDomainSummaryPrompt_WithReddit(t *testing.T) {
 			ExecutiveSummary: "Moderate Reddit presence.",
 		},
 	}
-	prompt := buildDomainSummaryPrompt("example.com", nil, nil, nil, redditAnalysis, BrandContextInfo{})
+	prompt := buildDomainSummaryPrompt("example.com", nil, nil, nil, redditAnalysis, summaryExtras{}, BrandContextInfo{})
 	if !strings.Contains(prompt, "REDDIT AUTHORITY") {
 		t.Error("prompt should contain REDDIT AUTHORITY section")
 	}
@@ -121,7 +121,7 @@ func TestBuildDomainSummaryPrompt_WithBrandContext(t *testing.T) {
 		Used:          true,
 		ContextString: "Brand: TestCo\nDescription: A SaaS company.\n",
 	}
-	prompt := buildDomainSummaryPrompt("example.com", nil, nil, nil, nil, brandInfo)
+	prompt := buildDomainSummaryPrompt("example.com", nil, nil, nil, nil, summaryExtras{}, brandInfo)
 	if !strings.Contains(prompt, "Brand Intelligence Context") {
 		t.Error("prompt should contain Brand Intelligence Context section")
 	}
@@ -151,7 +151,7 @@ func TestBuildDomainSummaryPrompt_AllData(t *testing.T) {
 	}
 	brandInfo := BrandContextInfo{Used: true, ContextString: "Brand: AllTest\n"}
 
-	prompt := buildDomainSummaryPrompt("x.com", optimizations, analysis, videoAnalysis, redditAnalysis, brandInfo)
+	prompt := buildDomainSummaryPrompt("x.com", optimizations, analysis, videoAnalysis, redditAnalysis, summaryExtras{}, brandInfo)
 	for _, want := range []string{"x.com", "SITE ANALYSIS", "OPTIMIZATION REPORTS", "YOUTUBE VIDEO AUTHORITY", "REDDIT AUTHORITY", "Brand Intelligence Context"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("expected prompt to contain %q", want)
@@ -167,8 +167,9 @@ func TestIsSummaryStale_NotStaleEmptyDB(t *testing.T) {
 	tenantCtx := testAuthContext("test-tenant", "test-user")
 
 	summary := DomainSummary{
-		Domain:      "fresh.com",
-		GeneratedAt: time.Now().Add(-time.Minute), // just generated
+		RubricVersion: scoringRubricVersion,
+		Domain:        "fresh.com",
+		GeneratedAt:   time.Now().Add(-time.Minute), // just generated
 	}
 
 	stale, count := isSummaryStale(ctx, db, tenantCtx, "fresh.com", summary)
@@ -190,8 +191,9 @@ func TestIsSummaryStale_NewerAnalysis(t *testing.T) {
 	})
 
 	summary := DomainSummary{
-		Domain:      "stale-analysis.com",
-		GeneratedAt: time.Now().Add(-2 * time.Hour),
+		RubricVersion: scoringRubricVersion,
+		Domain:        "stale-analysis.com",
+		GeneratedAt:   time.Now().Add(-2 * time.Hour),
 	}
 
 	stale, count := isSummaryStale(ctx, db, tenantCtx, "stale-analysis.com", summary)
@@ -217,6 +219,7 @@ func TestIsSummaryStale_VideoNotIncluded_Found(t *testing.T) {
 
 	// Summary does NOT include video — any video analysis should trigger staleness
 	summary := DomainSummary{
+		RubricVersion: scoringRubricVersion,
 		Domain:        "no-video-summary.com",
 		GeneratedAt:   time.Now().Add(-2 * time.Hour),
 		IncludesVideo: false,
@@ -242,6 +245,7 @@ func TestIsSummaryStale_VideoIncluded_NewerVideo(t *testing.T) {
 
 	// Summary DOES include video — only stale if newer video appeared
 	summary := DomainSummary{
+		RubricVersion: scoringRubricVersion,
 		Domain:        "stale-video.com",
 		GeneratedAt:   time.Now().Add(-2 * time.Hour),
 		IncludesVideo: true,
@@ -267,6 +271,7 @@ func TestIsSummaryStale_RedditNotIncluded_Found(t *testing.T) {
 
 	// Summary does NOT include reddit
 	summary := DomainSummary{
+		RubricVersion:  scoringRubricVersion,
 		Domain:         "no-reddit-summary.com",
 		GeneratedAt:    time.Now().Add(-2 * time.Hour),
 		IncludesReddit: false,
@@ -291,6 +296,7 @@ func TestIsSummaryStale_RedditIncluded_NewerReddit(t *testing.T) {
 	})
 
 	summary := DomainSummary{
+		RubricVersion:  scoringRubricVersion,
 		Domain:         "stale-reddit.com",
 		GeneratedAt:    time.Now().Add(-2 * time.Hour),
 		IncludesReddit: true,
@@ -690,8 +696,9 @@ func TestIsSummaryStale_NewerOptimizations(t *testing.T) {
 	})
 
 	summary := DomainSummary{
-		Domain:      "stale-opt.com",
-		GeneratedAt: time.Now().Add(-2 * time.Hour),
+		RubricVersion: scoringRubricVersion,
+		Domain:        "stale-opt.com",
+		GeneratedAt:   time.Now().Add(-2 * time.Hour),
 	}
 
 	stale, count := isSummaryStale(ctx, db, tenantCtx, "stale-opt.com", summary)
@@ -786,6 +793,7 @@ func TestIsSummaryStale_VideoIncluded_NotStale(t *testing.T) {
 	})
 
 	summary := DomainSummary{
+		RubricVersion: scoringRubricVersion,
 		Domain:        "old-video.com",
 		GeneratedAt:   time.Now().Add(-2 * time.Hour), // summary is newer than video
 		IncludesVideo: true,
@@ -810,6 +818,7 @@ func TestIsSummaryStale_RedditIncluded_NotStale(t *testing.T) {
 	})
 
 	summary := DomainSummary{
+		RubricVersion:  scoringRubricVersion,
 		Domain:         "old-reddit.com",
 		GeneratedAt:    time.Now().Add(-2 * time.Hour),
 		IncludesReddit: true,

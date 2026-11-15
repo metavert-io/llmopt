@@ -66,6 +66,8 @@ type OptimizationResult struct {
 	KnowledgePersistence   DimensionScore   `json:"knowledge_persistence" bson:"knowledgePersistence"`
 	Competitors            []Competitor     `json:"competitors" bson:"competitors"`
 	Recommendations        []Recommendation `json:"recommendations" bson:"recommendations"`
+	// RubricVersion is the scoring rubric the result was scored with (see scoring.go); 0 = before version 2.
+	RubricVersion int `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`
 }
 
 type Optimization struct {
@@ -267,7 +269,11 @@ type DomainSummary struct {
 	IncludesAnalysis bool                 `json:"includes_analysis" bson:"includesAnalysis"`
 	IncludesVideo    bool                 `json:"includes_video" bson:"includesVideo"`
 	IncludesReddit   bool                 `json:"includes_reddit" bson:"includesReddit"`
-	GeneratedAt      time.Time            `json:"generated_at" bson:"generatedAt"`
+	IncludesSearch   bool                 `json:"includes_search,omitempty" bson:"includesSearch,omitempty"`
+	IncludesLLMTest  bool                 `json:"includes_llm_test,omitempty" bson:"includesLlmTest,omitempty"`
+	// RubricVersion is the scoring rubric the summary was written with (scoring.go); 0 = before version 2.
+	RubricVersion int       `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`
+	GeneratedAt   time.Time `json:"generated_at" bson:"generatedAt"`
 }
 
 // Video Authority Analyzer types
@@ -432,6 +438,8 @@ type VideoAuthorityResult struct {
 	ExecutiveSummary    string                    `json:"executive_summary" bson:"executiveSummary"`
 	ConfidenceNote      string                    `json:"confidence_note" bson:"confidenceNote"`
 	Recommendations     []VideoRecommendation     `json:"recommendations" bson:"recommendations"`
+	// RubricVersion is the scoring rubric the result was scored with (see scoring.go); 0 = before version 2.
+	RubricVersion int `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`
 }
 
 // Top-level video analysis document
@@ -634,6 +642,8 @@ type RedditAuthorityResult struct {
 	ExecutiveSummary string                     `json:"executive_summary" bson:"executiveSummary"`
 	ConfidenceNote   string                     `json:"confidence_note" bson:"confidenceNote"`
 	Recommendations  []RedditRecommendation     `json:"recommendations" bson:"recommendations"`
+	// RubricVersion is the scoring rubric the result was scored with (see scoring.go); 0 = before version 2.
+	RubricVersion int `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`
 }
 
 // Top-level Reddit analysis document
@@ -670,6 +680,10 @@ type SearchVisibilityResult struct {
 	ExecutiveSummary  string                     `json:"executive_summary" bson:"executiveSummary"`
 	ConfidenceNote    string                     `json:"confidence_note" bson:"confidenceNote"`
 	Recommendations   []SearchRecommendation     `json:"recommendations" bson:"recommendations"`
+	// RubricVersion is the scoring rubric the result was scored with (see scoring.go); 0 = before version 2.
+	RubricVersion int `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`	// PillarsAdjusted marks an older result whose pillars got the version 2
+	// adjustments (scoring.go), so a re-saved copy isn't adjusted twice.
+	PillarsAdjusted bool `json:"pillars_adjusted,omitempty" bson:"pillarsAdjusted,omitempty"`
 }
 
 type AIOReadinessPillar struct {
