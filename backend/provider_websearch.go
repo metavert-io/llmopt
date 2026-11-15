@@ -21,6 +21,9 @@ import (
 type webSearchAnswer struct {
 	Text    string
 	Sources []string // cited URLs (Gemini gives the site, not the page)
+	// Searched: the model actually ran a web search (it may answer from
+	// memory even with the tool available).
+	Searched bool
 }
 
 // webSearchCaller is a provider that can answer with live web search.
@@ -93,6 +96,7 @@ func (p *AnthropicProvider) CallWithWebSearch(ctx context.Context, apiKey, model
 	budget := anthropicOutputBudget(model, maxTokens)
 	messages := []any{map[string]any{"role": "user", "content": prompt}}
 	headers := map[string]string{"x-api-key": apiKey, "anthropic-version": "2023-06-01"}
+	searched := false
 	for turn := 0; ; turn++ {
 		body, _ := json.Marshal(map[string]any{
 			"model":      model,
@@ -116,6 +120,7 @@ func (p *AnthropicProvider) CallWithWebSearch(ctx context.Context, apiKey, model
 		if err := json.Unmarshal(respBody, &msg); err != nil {
 			return webSearchAnswer{}, fmt.Errorf("failed to parse response: %w", err)
 		}
+		searched = searched || anthropicSearched(msg.Content)
 		if msg.StopReason == "pause_turn" && turn < webSearchContinuations {
 			// The server-side search loop paused: send its turn back to resume.
 			messages = append(messages, map[string]any{"role": "assistant", "content": msg.Content})
@@ -125,8 +130,24 @@ func (p *AnthropicProvider) CallWithWebSearch(ctx context.Context, apiKey, model
 		if err != nil {
 			return webSearchAnswer{}, err
 		}
-		return webSearchAnswer{Text: text, Sources: anthropicCitedURLs(msg.Content)}, nil
+		return webSearchAnswer{Text: text, Sources: anthropicCitedURLs(msg.Content), Searched: searched}, nil
 	}
+}
+
+// anthropicSearched reports whether a turn ran the web search tool.
+func anthropicSearched(content json.RawMessage) bool {
+	var blocks []struct {
+		Type string `json:"type"`
+	}
+	if json.Unmarshal(content, &blocks) != nil {
+		return false
+	}
+	for _, b := range blocks {
+		if b.Type == "server_tool_use" || b.Type == "web_search_tool_result" {
+			return true
+		}
+	}
+	return false
 }
 
 // anthropicCitedURLs lists the pages an answer's text cites.
@@ -212,7 +233,11 @@ func parseResponsesWebSearch(respBody []byte) (webSearchAnswer, error) {
 	var text strings.Builder
 	var sources []string
 	seen := map[string]bool{}
+	searched := false
 	for _, item := range result.Output {
+		if item.Type == "web_search_call" {
+			searched = true
+		}
 		if item.Type != "message" {
 			continue
 		}
@@ -234,7 +259,7 @@ func parseResponsesWebSearch(respBody []byte) (webSearchAnswer, error) {
 	if strings.TrimSpace(text.String()) == "" {
 		return webSearchAnswer{}, fmt.Errorf("empty answer")
 	}
-	return webSearchAnswer{Text: text.String(), Sources: sources}, nil
+	return webSearchAnswer{Text: text.String(), Sources: sources, Searched: searched || len(result.Citations) > 0}, nil
 }
 
 // ── Gemini (Google Search grounding) ──────────────────────────────────────
@@ -271,7 +296,8 @@ func parseGeminiWebSearch(respBody []byte) (webSearchAnswer, error) {
 				} `json:"parts"`
 			} `json:"content"`
 			GroundingMetadata struct {
-				GroundingChunks []struct {
+				WebSearchQueries []string `json:"webSearchQueries"`
+				GroundingChunks  []struct {
 					Web struct {
 						URI   string `json:"uri"`
 						Title string `json:"title"`
@@ -307,7 +333,8 @@ func parseGeminiWebSearch(respBody []byte) (webSearchAnswer, error) {
 		}
 		sources = addSource(sources, seen, u)
 	}
-	return webSearchAnswer{Text: text.String(), Sources: sources}, nil
+	searched := len(c.GroundingMetadata.WebSearchQueries) > 0 || len(c.GroundingMetadata.GroundingChunks) > 0
+	return webSearchAnswer{Text: text.String(), Sources: sources, Searched: searched}, nil
 }
 
 // urlHost returns u's lowercased host without "www.", or "".

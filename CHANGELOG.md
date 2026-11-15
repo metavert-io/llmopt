@@ -1,5 +1,16 @@
 # Changelog
 
+## 2026-11-15
+
+- **Answer optimization (2026 research follow-up)**: Structural Optimization now scores whether a page's title and key paragraph match the question as buyers ask it, the page property that held up when comparing pages within one site, and no longer credits FAQ blocks, summary boxes or page speed by themselves (they only appeared to help across different websites). Content Authority names the evidence assistants actually use in answers: figures, definitions, comparisons, steps and explicit prices. Pricing and plan details are treated as the claims AI gets wrong most often. A brand's own "best X" lists don't count as third-party coverage. Recommendations follow suit. Page scores are described as quality and fit for the question, not a predicted citation rate. These criteria apply to optimizations run from now on.
+- **LLM Test**:
+  - **Web-search diagnosis:** each answer given with web search records where the brand fell out: not found (content, indexing or crawler access), found among the sources but not named (positioning and reputation), named but not recommended (competitive), or recommended. The test shows these counts, and the mention rate for answers that cited the brand's own site against those that didn't. It also records whether the model actually searched (with search available, models sometimes answer from memory).
+  - **Grading:** sentiment is no longer part of an answer's score; it is rated separately, since tone varies most between runs. Accuracy checks pricing and plan claims first. Each test records the models that graded it.
+  - **Labels:** results say they come from the providers' APIs (the consumer apps can answer differently), and that with 5 or fewer runs a difference on one question is indicative.
+- **Peer comparison**: the scorecard and the competitor test note that assistants mostly name brands they already know (household names in 73% of category answers, niche brands 11% in one 2026 study), so compare with competitors of similar size.
+- **Crawler guidance**: Google-Extended controls Gemini training and grounding and, per Google, doesn't affect Google Search or AI Overviews, so recommendations no longer imply that unblocking it helps AI Overviews. robots.txt is described as stating intent, not enforcing it, and Google's planned 2027 training opt-out is mentioned.
+- **Scoring rubric 3**: new analyses and tests record rubric version 3, and executive summaries written before it are marked out of date.
+
 ## 2026-11-14
 
 - **LLM Test: repeated runs**: AI answers change from run to run (lists repeat less than 1% of the time), so each query can now be asked 1–5 times (the page defaults to 3, and remembers your choice). Rates cover every run, and each assistant shows the range between its lowest and highest run plus how consistent its mentions were (the share of queries mentioned, or not, every time). The overall score shows its range between runs. Per query, each assistant's runs are grouped ("Mentioned in 2 of 3 runs"), with every answer a click away. Answers are graded in batches of 30, so many runs still fit, and the grader is told not to score where a brand sits in a list. Competitor tests use the same number of runs as the test they're compared with.

@@ -123,6 +123,68 @@ func matchEvaluations(batch []testRawResponse, evals []testEvalEntry, idByName m
 	return out
 }
 
+// Stages of a web-search answer (see LLMTestStages).
+const (
+	stageNotFound            = "not_found"
+	stageFoundNotNamed       = "found_not_named"
+	stageNamedNotRecommended = "named_not_recommended"
+	stageRecommended         = "recommended"
+)
+
+// alnum keeps only lowercase letters and digits.
+func alnum(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// searchStage says how far the brand got in a graded web-search answer:
+// recommended, named but not recommended, found (its own site, or a page whose
+// address names it, among the sources) but not named, or not found.
+func searchStage(pr LLMTestProviderResult, domain, brandName string) string {
+	switch {
+	case pr.Recommended:
+		return stageRecommended
+	case pr.Mentioned:
+		return stageNamedNotRecommended
+	case pr.CitesOwnSite:
+		return stageFoundNotNamed
+	}
+	var keys []string
+	if k := alnum(brandName); len(k) >= 4 {
+		keys = append(keys, k)
+	}
+	if label, _, _ := strings.Cut(strings.TrimPrefix(strings.ToLower(domain), "www."), "."); len(alnum(label)) >= 5 {
+		keys = append(keys, alnum(label))
+	}
+	for _, u := range pr.Citations {
+		addr := alnum(strings.TrimPrefix(strings.TrimPrefix(u, "https://"), "http://"))
+		for _, k := range keys {
+			if strings.Contains(addr, k) {
+				return stageFoundNotNamed
+			}
+		}
+	}
+	return stageNotFound
+}
+
+func (s *LLMTestStages) count(stage string) {
+	switch stage {
+	case stageRecommended:
+		s.Recommended++
+	case stageNamedNotRecommended:
+		s.NamedNotRecommended++
+	case stageFoundNotNamed:
+		s.FoundNotNamed++
+	case stageNotFound:
+		s.NotFound++
+	}
+}
+
 // testProviderInfo is what the summaries need to know about one provider.
 type testProviderInfo struct {
 	id, name, model      string
@@ -136,6 +198,7 @@ type testSummaries struct {
 	scoreRange      []int
 	searchScore     *int
 	topCitedDomains []LLMTestCitedDomain
+	diagnosis       *LLMTestSearchDiagnosis
 }
 
 type testTally struct{ n, score, mentioned, recommended, accurate, sentiment int }
@@ -173,12 +236,15 @@ func summarizeTest(providers []testProviderInfo, results []LLMTestQueryResult, r
 	runScores := make([][]int, runs+1) // per run: each provider's score that run
 	cited := map[string]int{}
 	providerTotal, searchTotal, searchProviders := 0, 0, 0
+	var diag LLMTestSearchDiagnosis
 
 	for _, p := range providers {
 		var all, search testTally
 		perRun := make([]testTally, runs+1)
 		mentionsByQuery := map[int][]bool{}
-		citesOwn := 0
+		citesOwn, searched := 0, 0
+		var stages LLMTestStages
+		var own LLMTestOwnSiteSplit
 		for qi, qr := range results {
 			for _, pr := range qr.ProviderResults {
 				if pr.ProviderID != p.id || pr.Unscored || strings.HasPrefix(pr.Response, "Error: ") {
@@ -186,8 +252,21 @@ func summarizeTest(providers []testProviderInfo, results []LLMTestQueryResult, r
 				}
 				if pr.Search {
 					search.add(pr)
+					stages.count(pr.Stage)
+					if pr.Searched {
+						searched++
+					}
 					if pr.CitesOwnSite {
 						citesOwn++
+						own.WithOwnSite++
+						if pr.Mentioned {
+							own.MentionedWithOwnSite++
+						}
+					} else {
+						own.WithoutOwnSite++
+						if pr.Mentioned {
+							own.MentionedWithoutOwnSite++
+						}
 					}
 					seen := map[string]bool{}
 					for _, u := range pr.Citations {
@@ -252,7 +331,11 @@ func summarizeTest(providers []testProviderInfo, results []LLMTestQueryResult, r
 			}
 		}
 		if search.n > 0 || p.searchFailed > 0 {
-			ss := &LLMTestSearchSummary{Answered: search.n, Failed: p.searchFailed}
+			ss := &LLMTestSearchSummary{Answered: search.n, Failed: p.searchFailed, Searched: searched, Stages: stages, OwnSite: own}
+			diag.Answered += search.n
+			diag.Searched += searched
+			diag.Stages.add(stages)
+			diag.OwnSite.add(own)
 			if search.n > 0 {
 				ss.OverallScore = search.score / search.n
 				ss.MentionRate = search.rate(search.mentioned)
@@ -292,6 +375,7 @@ func summarizeTest(providers []testProviderInfo, results []LLMTestQueryResult, r
 	if searchProviders > 0 {
 		v := searchTotal / searchProviders
 		out.searchScore = &v
+		out.diagnosis = &diag
 	}
 	for h, n := range cited {
 		out.topCitedDomains = append(out.topCitedDomains, LLMTestCitedDomain{Domain: h, Answers: n, Own: isOwnSite("https://"+h, domain)})
@@ -321,4 +405,14 @@ func parseTestEvaluation(raw string, out *testEvaluation) error {
 		}
 	}
 	return errEvalNotJSON
+}
+
+// sortedKeys returns a set's keys in order.
+func sortedKeys(set map[string]bool) []string {
+	out := make([]string, 0, len(set))
+	for k := range set {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

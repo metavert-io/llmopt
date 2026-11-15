@@ -834,6 +834,10 @@ type LLMTestProviderResult struct {
 	// when one of them is on the tested domain.
 	Citations    []string `json:"citations,omitempty" bson:"citations,omitempty"`
 	CitesOwnSite bool     `json:"cites_own_site,omitempty" bson:"citesOwnSite,omitempty"`
+	// Searched: a web-search answer for which the model actually searched.
+	// Stage is how far the brand got in a web-search answer (see searchStage).
+	Searched bool   `json:"searched,omitempty" bson:"searched,omitempty"`
+	Stage    string `json:"stage,omitempty" bson:"stage,omitempty"`
 	// Unscored marks an answer the evaluator returned no verdict for; it
 	// counts in no rate.
 	Unscored bool `json:"unscored,omitempty" bson:"unscored,omitempty"`
@@ -885,6 +889,54 @@ type LLMTestSearchSummary struct {
 	OwnSiteRate int `json:"own_site_rate" bson:"ownSiteRate"`
 	Answered    int `json:"answered" bson:"answered"`
 	Failed      int `json:"failed,omitempty" bson:"failed,omitempty"`
+	// Searched counts answers for which the model actually searched.
+	Searched int                 `json:"searched" bson:"searched"`
+	Stages   LLMTestStages       `json:"stages" bson:"stages"`
+	OwnSite  LLMTestOwnSiteSplit `json:"own_site" bson:"ownSite"`
+}
+
+// LLMTestStages counts web-search answers by how far the brand got.
+type LLMTestStages struct {
+	// NotFound: neither the answer nor its sources point to the brand
+	// (a content, indexing or crawler problem).
+	NotFound int `json:"not_found" bson:"notFound"`
+	// FoundNotNamed: the brand's site or a page about it was among the
+	// sources, but the answer left it out (positioning, reputation).
+	FoundNotNamed int `json:"found_not_named" bson:"foundNotNamed"`
+	// NamedNotRecommended: named but another option preferred (competitive).
+	NamedNotRecommended int `json:"named_not_recommended" bson:"namedNotRecommended"`
+	Recommended         int `json:"recommended" bson:"recommended"`
+}
+
+func (s *LLMTestStages) add(o LLMTestStages) {
+	s.NotFound += o.NotFound
+	s.FoundNotNamed += o.FoundNotNamed
+	s.NamedNotRecommended += o.NamedNotRecommended
+	s.Recommended += o.Recommended
+}
+
+// LLMTestOwnSiteSplit compares how often web-search answers named the brand
+// when they cited its own site and when they didn't.
+type LLMTestOwnSiteSplit struct {
+	WithOwnSite             int `json:"with_own_site" bson:"withOwnSite"`
+	MentionedWithOwnSite    int `json:"mentioned_with_own_site" bson:"mentionedWithOwnSite"`
+	WithoutOwnSite          int `json:"without_own_site" bson:"withoutOwnSite"`
+	MentionedWithoutOwnSite int `json:"mentioned_without_own_site" bson:"mentionedWithoutOwnSite"`
+}
+
+func (s *LLMTestOwnSiteSplit) add(o LLMTestOwnSiteSplit) {
+	s.WithOwnSite += o.WithOwnSite
+	s.MentionedWithOwnSite += o.MentionedWithOwnSite
+	s.WithoutOwnSite += o.WithoutOwnSite
+	s.MentionedWithoutOwnSite += o.MentionedWithoutOwnSite
+}
+
+// LLMTestSearchDiagnosis sums the web-search answers of every provider.
+type LLMTestSearchDiagnosis struct {
+	Answered int                 `json:"answered" bson:"answered"`
+	Searched int                 `json:"searched" bson:"searched"`
+	Stages   LLMTestStages       `json:"stages" bson:"stages"`
+	OwnSite  LLMTestOwnSiteSplit `json:"own_site" bson:"ownSite"`
 }
 
 // LLMTestCitedDomain is a site the web-search answers cited, and how many
@@ -927,8 +979,11 @@ type LLMTest struct {
 	// the overall score of those answers ("searched" visibility; OverallScore
 	// is what the models remember), TopCitedDomains the sites they cited.
 	WebSearch       bool                 `json:"web_search,omitempty" bson:"webSearch,omitempty"`
-	SearchScore     *int                 `json:"search_score,omitempty" bson:"searchScore,omitempty"`
-	TopCitedDomains []LLMTestCitedDomain `json:"top_cited_domains,omitempty" bson:"topCitedDomains,omitempty"`
+	SearchScore     *int                    `json:"search_score,omitempty" bson:"searchScore,omitempty"`
+	TopCitedDomains []LLMTestCitedDomain    `json:"top_cited_domains,omitempty" bson:"topCitedDomains,omitempty"`
+	SearchDiagnosis *LLMTestSearchDiagnosis `json:"search_diagnosis,omitempty" bson:"searchDiagnosis,omitempty"`
+	// GraderModels are the models that graded the answers ("Provider model").
+	GraderModels []string `json:"grader_models,omitempty" bson:"graderModels,omitempty"`
 	// RubricVersion is the scoring rubric (scoring.go); 0 = before version 2.
 	RubricVersion int `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`
 }

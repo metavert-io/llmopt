@@ -2257,7 +2257,7 @@ NOTE — MISSING COVERAGE: This question is a brand aspiration NOT currently add
 NOTE — DISCOVERY QUESTION: This question represents what your target audience searches for without knowing your brand. They are searching the category, not your brand. Evaluate how well the site's content would satisfy this category-level question and position the brand as a solution. Score realistically — if no content addresses this, scores will be low. Recommendations should focus on creating discoverable content for this topic.`
 		}
 
-		prompt := fmt.Sprintf(`You are an LLM visibility analyst. Your task is to assess how likely a large language model (like ChatGPT, Claude, Perplexity, or Gemini with web search) is to surface and cite a website's answer to a specific question.
+		prompt := fmt.Sprintf(`You are an LLM visibility analyst. Your task is to assess how well a website answers a specific question for AI assistants (like ChatGPT, Claude, Perplexity, or Gemini with web search): how well its page fits the question and gives evidence a model can use, and how well the web corroborates it. Scores describe quality and fit for the question, not a predicted citation rate: whether an assistant names a brand also depends on how well it already knows the brand, which page rewrites don't change.
 
 Website domain: %s
 Question: %s
@@ -2268,21 +2268,24 @@ Your analysis must evaluate four dimensions, each scored 0-100:
 ## Dimension 1: Content Authority (30%% weight) — query fit and extractable evidence
 Visit the page URL(s) above and evaluate:
 - Does the page answer this exact question directly and early, in words a model could lift into its answer?
-- Does it back the answer with specific, sourced facts (figures, named sources, dates, prices, specifications) rather than general claims?
+- Does it give the kinds of evidence assistants actually use in answers: figures, definitions, comparisons, steps, and explicit prices? (In 2026 measurements, pages with figures, definitions or comparisons shaped answers markedly more than pages without; Q&A formatting by itself did not help.)
+- Are its facts specific and sourced (named sources, dates, prices, specifications) rather than general claims? Pricing and plan details matter most: they are the claims AI answers most often get wrong, so current, explicit pricing on the site's own pages is a strength and stale pricing on old pages is a risk.
 - Does it cite its sources inline, so the evidence can be checked?
 - Is the writing clear and precise, using the field's own terminology correctly?
 - Is there keyword stuffing or marketing fluff? (Penalize it: it hurts in generative engines.)
 Rewriting tricks such as adding quotations or statistics for their own sake showed large gains in a 2023 lab study but don't reliably hold up on live engines in 2025-2026 replications; relevance to the question and prominence of the answer are what reproduce. Score evidence that answers the question, not decoration.
 
-## Dimension 2: Structural Optimization (20%% weight)
+## Dimension 2: Structural Optimization (20%% weight) — does the page match the question?
+- Do the page title and a key paragraph match the question as buyers actually ask it? This is the page property that held up in 2026 studies comparing pages within the same site: matching pages are cited more.
 - Is the answer to the question front-loaded (prominent) or buried deep in the page?
 - Is the content concise and focused, or sprawling and padded?
-- Are there extractable structures (comparison tables, FAQ blocks, bulleted lists, clear headings)? Schema.org markup helps rich results and entity understanding but showed no measurable AI citation lift in 2026 tests, so note it without scoring it as a citation driver.
+- Are comparisons and steps laid out so they can be lifted cleanly (comparison tables, numbered steps, clear headings)?
+- Don't award points for FAQ blocks, summary boxes or page speed by themselves: in 2026 research they appeared to help only across different websites (better sites tend to have them), not when comparing pages of the same site. Schema.org markup helps rich results and entity understanding but showed no AI citation lift on live engines, so note it without scoring it.
 - Does the content explain "why" not just "what" — providing justification language?
 
 ## Dimension 3: Source Authority (30%% weight)
 Search the web for third-party coverage:
-- Is this site or brand covered by independent sources for this topic: review sites, industry publications, analysts, "best X" and comparison lists, Wikipedia, and YouTube videos from other creators? Count all of these as third-party coverage.
+- Is this site or brand covered by independent sources for this topic: review sites, industry publications, analysts, "best X" and comparison lists published by others, Wikipedia, and YouTube videos from other creators? Count all of these as third-party coverage. Never count a brand's own "best X" or self-ranked lists as third-party coverage: assistants often cite such lists while recommending a competitor.
 - Is this earned media coverage (independent third parties) rather than brand-owned content?
 - AI search engines cite independent third-party sources 72-92%% of the time. YouTube is the most-cited domain in Google AI Overviews and Wikipedia the most-cited in ChatGPT; Reddit discussions count too, though Reddit's share of AI citations fell sharply in 2026.
 - How does this site's authority compare to other sites answering the same question?
@@ -2299,7 +2302,7 @@ Also identify:
 - For each competitor: estimate their overall score and note their key strengths
 - 3-5 prioritized recommendations (high/medium/low) for improving the site's LLM visibility for this question
 
-Recommendations must follow current evidence: answer buyers' real questions directly and early, with sourced facts; build third-party presence where AI answers draw from (Wikipedia, comparison and review sites, YouTube creators, and genuine Reddit participation without over-investing); refresh key product, pricing and comparison pages at least yearly with honest update dates. Don't recommend llms.txt, schema markup as a way to win AI citations, or adding quotations or statistics for a visibility percentage.
+Recommendations must follow current evidence: make the page title and opening paragraph answer the buyer's question as they ask it; answer directly and early with the evidence assistants use (figures, definitions, comparisons, steps, explicit current prices) and cite sources; build third-party presence where AI answers draw from (Wikipedia, independent comparison and review sites, YouTube creators, and genuine Reddit participation without over-investing); keep pricing and plan details explicit and current, and audit older pages that state outdated ones; refresh key product, pricing and comparison pages at least yearly with honest update dates. Don't recommend llms.txt, schema markup as a way to win AI citations, FAQ blocks or summary boxes as citation levers, self-published "best X" lists, or adding quotations or statistics for a visibility percentage.
 
 Return your analysis as JSON in exactly this format (no markdown code fences, just raw JSON):
 {
@@ -4195,6 +4198,17 @@ func buildDomainSummaryPrompt(domain string, optimizations []Optimization, analy
 		if t.SearchScore != nil {
 			sections.WriteString(fmt.Sprintf("With web search (what assistants find, vs. what they remember): %d/100\n", *t.SearchScore))
 		}
+		if d := t.SearchDiagnosis; d != nil && d.Answered > 0 {
+			st := d.Stages
+			sections.WriteString(fmt.Sprintf("Web-search answers (%d): brand not found in %d, found in the sources but not named in %d, named but not recommended in %d, recommended in %d.",
+				d.Answered, st.NotFound, st.FoundNotNamed, st.NamedNotRecommended, st.Recommended))
+			if o := d.OwnSite; o.WithOwnSite > 0 && o.WithoutOwnSite > 0 {
+				sections.WriteString(fmt.Sprintf(" Named in %d%% of answers that cited the brand's own site and %d%% of those that didn't.",
+					o.MentionedWithOwnSite*100/o.WithOwnSite, o.MentionedWithoutOwnSite*100/o.WithoutOwnSite))
+			}
+			sections.WriteString("\n")
+		}
+		sections.WriteString("(These answers come from the providers' APIs; the consumer apps can give different answers and cite different sites. Sentiment is rated separately and is not part of the score.)\n")
 	}
 
 	brandSection := ""
@@ -7490,7 +7504,8 @@ Search visibility affects AI citation through two distinct pathways:
 
 **Crawl Accessibility:**
 - Crawlers differ by purpose: GPTBot (OpenAI) and ClaudeBot (Anthropic) collect training data; OAI-SearchBot powers ChatGPT search; ChatGPT-User fetches pages a user asks about and may not follow robots.txt
-- Blocking training crawlers is a business choice; blocking search crawlers hides the site from AI answers. Blocking Google-Extended is associated with less AI Overview retrieval (SIGIR 2026)
+- Blocking training crawlers is a business choice; blocking search crawlers hides the site from AI answers. Google-Extended controls whether Google may use a site for Gemini training and for grounding Gemini's answers; Google says it does not affect inclusion or ranking in Google Search (AI Overviews are governed by Googlebot). A SIGIR 2026 study found sites that block it get less AI Overview retrieval, but those are mostly large publishers, so that is an association, not a reason to expect AI Overview gains from unblocking it
+- robots.txt states intent; it isn't enforcement. In a controlled 2026 study some AI agents (including Gemini's and Copilot's) fetched pages robots.txt disallowed, and several agents use generic browser user-agents. Training is about half of AI crawler traffic and mixed-purpose crawlers over a third (Cloudflare, July 2026); real blocking needs network-level controls. Google plans an AI training opt-out signal (AIPREF) in 2027
 - Since 15 September 2026 Cloudflare blocks AI crawlers by default on new domains, so a site can be blocked without its owner choosing it
 
 **Content Freshness:**
@@ -7507,7 +7522,7 @@ Search visibility affects AI citation through two distinct pathways:
 
 Using the web_search tool, conduct a comprehensive search visibility analysis of %s. You must:
 
-1. **Visit the site's robots.txt** — search for "%s robots.txt" and/or try to access it directly. Identify which crawlers are explicitly allowed or disallowed. Separate the crawlers that fetch pages for AI answers and search (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot, Googlebot, Bingbot) from the training crawlers (GPTBot, ClaudeBot) and Google-Extended (Gemini training and grounding). Blocking training crawlers is a business choice, not a visibility problem; blocking search crawlers hides the site from AI answers. Note whether the site is behind Cloudflare, whose default AI-bot blocking can block crawlers the robots.txt allows.
+1. **Visit the site's robots.txt** — search for "%s robots.txt" and/or try to access it directly. Identify which crawlers are explicitly allowed or disallowed. Separate the crawlers that fetch pages for AI answers and search (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot, Googlebot, Bingbot) from the training crawlers (GPTBot, ClaudeBot) and Google-Extended (Gemini training and grounding; per Google it doesn't affect Google Search or AI Overviews). Blocking training crawlers is a business choice, not a visibility problem; blocking search crawlers hides the site from AI answers. Note whether the site is behind Cloudflare, whose default AI-bot blocking can block crawlers the robots.txt allows, and remember robots.txt only states intent: it doesn't stop crawlers that ignore it.
 
 2. **Check for structured data** — Visit key pages of the site and check for Schema.org markup (JSON-LD), OpenGraph tags, structured content (tables, FAQ sections, comparison formats). Schema helps rich results and entity understanding, not AI citation, so it counts little.
 
@@ -7615,7 +7630,7 @@ Return your analysis as a JSON object with this exact structure:
 IMPORTANT:
 - The overall_score should be a weighted average: %s
 - Provide 3-6 evidence items per pillar with specific, verifiable findings
-- Include 4-8 prioritized recommendations, following current evidence: allow the crawlers that fetch pages for AI answers (blocking training crawlers is the owner's business choice) and check Cloudflare's AI bot setting; refresh key product, pricing and comparison pages at least yearly with honest update dates; build third-party presence (Wikipedia, review and comparison sites, YouTube creators). Don't recommend llms.txt, and recommend schema only for rich results and entity understanding, not as an AI citation lever
+- Include 4-8 prioritized recommendations, following current evidence: allow the crawlers that fetch pages for AI answers (blocking training crawlers is the owner's business choice; don't promise AI Overview gains from unblocking Google-Extended) and check Cloudflare's AI bot setting; if the owner wants to keep AI crawlers out, say robots.txt alone won't do it; refresh key product, pricing and comparison pages at least yearly with honest update dates; build third-party presence (Wikipedia, review and comparison sites, YouTube creators). Don't recommend llms.txt, and recommend schema only for rich results and entity understanding, not as an AI citation lever
 - In the confidence_note, mention that AI answers vary from run to run, so visibility is best judged by how often the brand appears over repeated runs, per engine
 - Be specific and cite actual findings from your searches
 - Return ONLY the JSON object, no markdown fencing or explanation
@@ -8215,6 +8230,7 @@ type testRawResponse struct {
 	queryIdx     int
 	run          int  // 1-based repeat of the query
 	search       bool // answered with web search
+	searched     bool // the model actually searched
 	response     string
 	sources      []string
 	err          error
@@ -8766,6 +8782,7 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 							queryIdx:     wk.qi,
 							run:          wk.run,
 							search:       wk.search,
+							searched:     resp.Searched,
 							response:     resp.Text,
 							sources:      resp.Sources,
 							err:          err,
@@ -8888,6 +8905,7 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 		evals := map[int]testEvalEntry{}
 		var evalMu sync.Mutex
 		var evalErrs []string
+		graders := map[string]bool{}
 		sem := make(chan struct{}, evalParallel)
 		var evalWG sync.WaitGroup
 		for bi, batch := range batches {
@@ -8925,6 +8943,7 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 					for id, e := range matched {
 						evals[id] = e
 					}
+					graders[c.provider.Name()+" "+c.model] = true
 					evalMu.Unlock()
 					if len(batches) > 1 {
 						notify(fmt.Sprintf("Evaluated batch %d of %d (%s).", bi+1, len(batches), c.provider.Name()))
@@ -8974,6 +8993,7 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 				Response:     resp.response,
 				Run:          resp.run,
 				Search:       resp.search,
+				Searched:     resp.search && resp.searched,
 				Citations:    resp.sources,
 			}
 			for _, u := range resp.sources {
@@ -8989,6 +9009,9 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			} else if e, ok := evals[resp.id]; ok {
 				pr.Mentioned, pr.Recommended = e.Mentioned, e.Recommended
 				pr.Sentiment, pr.Accuracy, pr.Score = e.Sentiment, e.Accuracy, e.Score
+				if pr.Search {
+					pr.Stage = searchStage(pr, req.Domain, brandName)
+				}
 			} else {
 				pr.Unscored = true
 			}
@@ -9037,6 +9060,8 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			WebSearch:            req.WebSearch,
 			SearchScore:          sum.searchScore,
 			TopCitedDomains:      sum.topCitedDomains,
+			SearchDiagnosis:      sum.diagnosis,
+			GraderModels:         sortedKeys(graders),
 			RubricVersion:        scoringRubricVersion,
 		}
 
@@ -9133,8 +9158,8 @@ For each query-response pair, evaluate:
 1. **mentioned**: Is the brand explicitly mentioned by name? (boolean)
 2. **recommended**: Is the brand recommended, suggested, or positioned as a good option? (boolean)
 3. **sentiment**: Overall sentiment toward the brand in the response. Use "absent" if the brand isn't mentioned at all. (positive/neutral/negative/absent)
-4. **accuracy**: Are factual claims about the brand accurate based on the brand information above? Use "not_applicable" if brand isn't discussed. (accurate/partially_accurate/inaccurate/not_applicable)
-5. **score**: Overall brand representation quality 0-100. Consider: Is the brand mentioned? Described favorably? Information accurate? Recommended when relevant? Don't reward or penalize where the brand appears in a list: the order of AI answer lists changes from run to run.
+4. **accuracy**: Are factual claims about the brand accurate based on the brand information above? Check pricing, plans and costs first: they are the claims AI answers most often get wrong. Use "not_applicable" if brand isn't discussed. (accurate/partially_accurate/inaccurate/not_applicable)
+5. **score**: How well the response represents the brand, 0-100: is the brand mentioned, recommended when relevant, and described accurately? Leave tone out of the score: it is rated separately as sentiment, and it varies more between runs than anything else. Don't reward or penalize where the brand appears in a list: the order of AI answer lists changes from run to run.
 
 The same query may appear several times for one assistant (it was asked more than once, or once with web search). Grade each response on its own.
 

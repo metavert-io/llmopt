@@ -300,7 +300,7 @@ body.web .cover { height: auto; min-height: 250mm; }
 {{with .Opt}}
 <section class="sheet" id="optimization">
   <div class="section-head">
-    <div><div class="eyebrow">Your answers</div><h2>Answer Optimization</h2><div class="lede">How likely AI is to surface and cite your answer, for {{.Count}} questions.</div></div>
+    <div><div class="eyebrow">Your answers</div><h2>Answer Optimization</h2><div class="lede">How well your pages answer {{.Count}} questions for AI assistants: quality and fit for the question, not a predicted citation rate.</div></div>
     <div class="badge-score"><div class="num t-{{scoreClass .Average}}">{{.Average}}<span class="den"> / 100</span></div><div class="lbl">Average</div></div>
   </div>
   <div class="grid g4">{{range .Dims}}{{template "card" .}}{{end}}</div>
@@ -387,7 +387,7 @@ body.web .cover { height: auto; min-height: 250mm; }
 {{with .Test}}
 <section class="sheet" id="llm-test">
   <div class="section-head">
-    <div><div class="eyebrow">Live test</div><h2>LLM Brand Test</h2><div class="lede">What today's AI assistants actually say when asked about you and your category.{{if gt .Runs 1}} Each query was asked {{.Runs}} times{{if .HasRange}}; the overall score ranged {{.ScoreLow}}–{{.ScoreHigh}} between runs{{end}}.{{end}}</div></div>
+    <div><div class="eyebrow">Live test</div><h2>LLM Brand Test</h2><div class="lede">What today's AI assistants actually say when asked about you and your category.{{if gt .Runs 1}} Each query was asked {{.Runs}} times{{if .HasRange}}; the overall score ranged {{.ScoreLow}}–{{.ScoreHigh}} between runs{{end}}.{{end}} Answers come from each provider's API; the consumer apps can answer differently and cite different sites.</div></div>
     <div class="badge-score"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Overall</div></div>
   </div>
   <div class="grid {{if ge (len .Providers) 4}}g4{{else}}g3{{end}}">
@@ -418,17 +418,33 @@ body.web .cover { height: auto; min-height: 250mm; }
   <table style="margin-top:10px"><thead><tr><th>Assistant</th><th class="num">Mentioned</th><th class="num">Recommended</th><th class="num">Cites your site</th></tr></thead>
     <tbody>{{range .Providers}}{{$p := .}}{{with .Search}}{{if .Answered}}<tr><td style="font-weight:600;color:var(--ink)">{{$p.ProviderName}}</td><td class="num">{{.MentionRate}}%</td><td class="num">{{.RecommendRate}}%</td><td class="num">{{.OwnSiteRate}}%</td></tr>{{end}}{{end}}{{end}}</tbody>
   </table>
+  {{with .Diagnosis}}
+  <h3>Why searched answers miss you</h3>
+  <table><thead><tr><th>Where the brand fell out</th><th class="num">Answers</th><th>What it points to</th></tr></thead>
+    <tbody>
+      <tr><td style="color:var(--ink);font-weight:600">Not found</td><td class="num">{{.Stages.NotFound}}</td><td style="color:var(--muted)">The search didn't surface your site or a page about you: content, indexing or crawler access.</td></tr>
+      <tr><td style="color:var(--ink);font-weight:600">Found, not named</td><td class="num">{{.Stages.FoundNotNamed}}</td><td style="color:var(--muted)">You were among the sources but left out of the answer: positioning and reputation.</td></tr>
+      <tr><td style="color:var(--ink);font-weight:600">Named, not recommended</td><td class="num">{{.Stages.NamedNotRecommended}}</td><td style="color:var(--muted)">Assistants know you but prefer others: competitive standing.</td></tr>
+      <tr><td style="color:var(--ink);font-weight:600">Recommended</td><td class="num">{{.Stages.Recommended}}</td><td style="color:var(--muted)">&nbsp;</td></tr>
+    </tbody>
+  </table>
+  {{if lt .Searched .Answered}}<p class="note">In {{.Searched}} of {{.Answered}} of these answers the assistant actually ran a search; the rest it answered from memory with search available.</p>{{end}}
+  {{end}}
+  {{if .HasOwnSplit}}<p class="note">Answers that cited your own site named you {{.OwnRate}}% of the time; answers that didn't, {{.NoOwnRate}}%. Having a page that answers the question is one of the strongest links to being named.</p>{{end}}
   {{if .Cited}}<h3>Sites the searched answers cited</h3>
   <table><thead><tr><th>Site</th><th class="num">Answers citing it</th></tr></thead>
     <tbody>{{range .Cited}}<tr><td style="color:var(--ink)">{{.Domain}}{{if .Own}} <span class="chip g">Your site</span>{{end}}</td><td class="num">{{.Answers}}</td></tr>{{end}}</tbody>
   </table>{{end}}
   {{end}}
+  <p class="note">Assistants mostly name brands they already know: in one 2026 study, household names appeared in 73% of category answers, mid-market brands 44% and niche brands 11%. Compare these results with competitors of similar size. Sentiment is rated separately and isn't part of the score.</p>
   {{if .Queries}}
   <h3>Query results{{if gt .TotalQueries (len .Queries)}} (first {{len .Queries}} of {{.TotalQueries}}){{end}}</h3>
+  {{if le .Runs 5}}<p class="note" style="margin-top:0">With {{.Runs}} run{{if gt .Runs 1}}s{{end}} per question, a difference on a single question is indicative; the brand-level rates above are the reliable comparison.</p>{{end}}
   <table><thead><tr><th>Query</th><th>Answers</th></tr></thead>
     <tbody>{{range .Queries}}<tr><td style="color:var(--ink);width:45%">{{.Query}}</td><td>{{range .Answers}}<span class="chip {{if .Recommended}}g{{else if .Mentioned}}a{{else}}n{{end}}" style="margin:1px 3px 1px 0">{{.Provider}}{{if .Search}} (web){{end}} {{.Score}}{{if gt .Of 1}} · mentions {{.Mentioned}}/{{.Of}}{{else if .Recommended}} · recommends{{else if .Mentioned}} · mentions{{end}}</span>{{end}}</td></tr>{{end}}</tbody>
   </table>
   {{end}}
+  {{if .Graders}}<p class="note">Answers graded by {{.Graders}}.</p>{{end}}
 </section>
 {{end}}
 
