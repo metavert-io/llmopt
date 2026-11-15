@@ -130,8 +130,11 @@ func TestParseResponsesWebSearch(t *testing.T) {
 		{"type": "message", "content": [{"type": "output_text", "text": "Try Example.",
 			"annotations": [{"type": "url_citation", "url": "https://example.com/a"}, {"type": "url_citation", "url": "https://example.com/a"}]}]}
 	], "citations": ["https://other.test/b"]}`))
-	if err != nil || ans.Text != "Try Example." || fmt.Sprint(ans.Sources) != "[https://example.com/a https://other.test/b]" {
+	if err != nil || ans.Text != "Try Example." || fmt.Sprint(ans.Sources) != "[https://example.com/a https://other.test/b]" || !ans.Searched {
 		t.Errorf("ans = %+v, err %v", ans, err)
+	}
+	if a, _ := parseResponsesWebSearch([]byte(`{"output": [{"type": "message", "content": [{"type": "output_text", "text": "From memory."}]}]}`)); a.Searched {
+		t.Error("an answer without a web_search_call didn't search")
 	}
 	if _, err := parseResponsesWebSearch([]byte(`{"output": []}`)); err == nil {
 		t.Error("an empty answer must be an error")
@@ -144,7 +147,7 @@ func TestParseGeminiWebSearch(t *testing.T) {
 			{"web": {"uri": "https://vertexaisearch.cloud.google.com/grounding-api-redirect/abc", "title": "example.com"}},
 			{"web": {"uri": "https://reviews.test/page", "title": "Reviews"}}
 		]}}]}`))
-	if err != nil || ans.Text != "Example is good." || fmt.Sprint(ans.Sources) != "[https://example.com/ https://reviews.test/page]" {
+	if err != nil || ans.Text != "Example is good." || fmt.Sprint(ans.Sources) != "[https://example.com/ https://reviews.test/page]" || !ans.Searched {
 		t.Errorf("ans = %+v, err %v", ans, err)
 	}
 }
@@ -192,7 +195,7 @@ func TestAnthropicWebSearch_ResumesPausedTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ans.Text != "Example is a fine choice." || fmt.Sprint(ans.Sources) != "[https://example.com/p]" {
+	if ans.Text != "Example is a fine choice." || fmt.Sprint(ans.Sources) != "[https://example.com/p]" || !ans.Searched {
 		t.Errorf("ans = %+v", ans)
 	}
 	if len(bodies) != 2 {
@@ -262,7 +265,7 @@ func TestLLMTest_RepeatedRunsAndWebSearch(t *testing.T) {
 		return "Try another service.", nil
 	}
 	searcher := &searchingProvider{TestProvider: tp, searchFn: func(prompt string) (webSearchAnswer, error) {
-		return webSearchAnswer{Text: "Example Health is listed by reviewers.", Sources: []string{"https://www.example.com/pricing", "https://reviews.test/best"}}, nil
+		return webSearchAnswer{Text: "Example Health is listed by reviewers.", Sources: []string{"https://www.example.com/pricing", "https://reviews.test/best"}, Searched: true}, nil
 	}}
 	plain := newTestProvider() // can't search
 	plain.id, plain.name = "grok", "Grok"
@@ -316,6 +319,22 @@ func TestLLMTest_RepeatedRunsAndWebSearch(t *testing.T) {
 	if result.SearchScore == nil || *result.SearchScore != 80 {
 		t.Errorf("search score = %v", result.SearchScore)
 	}
+	if d := result.SearchDiagnosis; d == nil || d.Answered != 2 || d.Searched != 2 || d.Stages.Recommended != 2 || d.OwnSite.WithOwnSite != 2 || d.OwnSite.MentionedWithOwnSite != 2 {
+		t.Errorf("diagnosis = %+v", result.SearchDiagnosis)
+	}
+	if len(result.GraderModels) != 1 || !strings.HasPrefix(result.GraderModels[0], "Anthropic ") {
+		t.Errorf("grader models = %v", result.GraderModels)
+	}
+	for _, qr := range result.Results {
+		for _, pr := range qr.ProviderResults {
+			if pr.Search && (pr.Stage != stageRecommended || !pr.Searched) {
+				t.Errorf("search answer stage %q searched %v", pr.Stage, pr.Searched)
+			}
+			if !pr.Search && (pr.Stage != "" || pr.Searched) {
+				t.Errorf("a remembered answer has no stage: %+v", pr)
+			}
+		}
+	}
 	if len(result.TopCitedDomains) != 2 || !result.TopCitedDomains[0].Own && !result.TopCitedDomains[1].Own {
 		t.Errorf("cited = %+v", result.TopCitedDomains)
 	}
@@ -330,6 +349,10 @@ func TestRenderReportHTML_TestRunsAndSearch(t *testing.T) {
 	d := fixtureReportData()
 	search := 71
 	d.LLMTest.Runs, d.LLMTest.ScoreRange, d.LLMTest.SearchScore = 3, []int{45, 58}, &search
+	d.LLMTest.SearchDiagnosis = &LLMTestSearchDiagnosis{Answered: 10, Searched: 8,
+		Stages:  LLMTestStages{NotFound: 4, FoundNotNamed: 2, NamedNotRecommended: 1, Recommended: 3},
+		OwnSite: LLMTestOwnSiteSplit{WithOwnSite: 4, MentionedWithOwnSite: 3, WithoutOwnSite: 6, MentionedWithoutOwnSite: 1}}
+	d.LLMTest.GraderModels = []string{"Anthropic claude-opus-5-5"}
 	d.LLMTest.TopCitedDomains = []LLMTestCitedDomain{{Domain: "reviews.test", Answers: 4}, {Domain: "example.com", Answers: 2, Own: true}}
 	d.LLMTest.ProviderSummaries[0].Spread = &LLMTestSpread{MentionLow: 60, MentionHigh: 80, RecommendLow: 40, RecommendHigh: 40, Consistency: 75}
 	d.LLMTest.ProviderSummaries[0].Search = &LLMTestSearchSummary{OverallScore: 71, MentionRate: 90, RecommendRate: 50, OwnSiteRate: 30, Answered: 10}
@@ -352,6 +375,8 @@ func TestRenderReportHTML_TestRunsAndSearch(t *testing.T) {
 		for _, want := range []string{
 			"asked 3 times", "ranged 45–58", "60–80%", "75%", "With web search", "Searched", ">71<",
 			"reviews.test", "Your site", "OpenAI 50 · mentions 2/3", "OpenAI (web) 90 · recommends",
+			"Why searched answers miss you", "Found, not named", "named you 75% of the time", "didn't, 16%", "In 8 of 10",
+			"provider's API", "similar size", "a single question is indicative", "graded by Anthropic claude-opus-5-5",
 		} {
 			if !strings.Contains(html, want) {
 				t.Errorf("%s: output lacks %q", mode, want)
@@ -360,5 +385,58 @@ func TestRenderReportHTML_TestRunsAndSearch(t *testing.T) {
 	}
 	if _, engine, err := generateReportPDF(context.Background(), d); err != nil || engine == "" {
 		t.Errorf("PDF: engine %q, err %v", engine, err)
+	}
+}
+
+func TestSearchStage(t *testing.T) {
+	base := LLMTestProviderResult{Search: true}
+	cases := []struct {
+		name string
+		pr   LLMTestProviderResult
+		want string
+	}{
+		{"recommended", LLMTestProviderResult{Mentioned: true, Recommended: true}, stageRecommended},
+		{"named", LLMTestProviderResult{Mentioned: true}, stageNamedNotRecommended},
+		{"own site cited", LLMTestProviderResult{CitesOwnSite: true, Citations: []string{"https://example.com/a"}}, stageFoundNotNamed},
+		{"page about the brand", LLMTestProviderResult{Citations: []string{"https://reviews.test/example-health-review"}}, stageFoundNotNamed},
+		{"domain name in an address", LLMTestProviderResult{Citations: []string{"https://news.test/example-raises-funding"}}, stageFoundNotNamed},
+		{"nothing", LLMTestProviderResult{Citations: []string{"https://other.test/best-clinics"}}, stageNotFound},
+		{"no sources", base, stageNotFound},
+	}
+	for _, c := range cases {
+		if got := searchStage(c.pr, "example.com", "Example Health"); got != c.want {
+			t.Errorf("%s: %q, want %q", c.name, got, c.want)
+		}
+	}
+	// A short brand name isn't matched inside other words.
+	if got := searchStage(LLMTestProviderResult{Citations: []string{"https://x.test/abcdef"}}, "abc.com", "Abc"); got != stageNotFound {
+		t.Errorf("short names must not match: %q", got)
+	}
+}
+
+func TestSummarizeTest_SearchStagesAndOwnSite(t *testing.T) {
+	sr := func(mentioned, recommended, own, searched bool, stage string) LLMTestProviderResult {
+		pr := scoredResult("a", 1, true, mentioned, 50)
+		pr.Recommended, pr.CitesOwnSite, pr.Searched, pr.Stage = recommended, own, searched, stage
+		return pr
+	}
+	results := []LLMTestQueryResult{{ProviderResults: []LLMTestProviderResult{
+		scoredResult("a", 1, false, true, 60),
+		sr(true, true, true, true, stageRecommended),
+		sr(true, false, false, true, stageNamedNotRecommended),
+		sr(false, false, true, true, stageFoundNotNamed),
+		sr(false, false, false, false, stageNotFound),
+	}}}
+	sum := summarizeTest([]testProviderInfo{{id: "a"}}, results, 1, "example.com")
+	ss := sum.providers[0].Search
+	want := LLMTestStages{NotFound: 1, FoundNotNamed: 1, NamedNotRecommended: 1, Recommended: 1}
+	if ss == nil || ss.Stages != want || ss.Searched != 3 {
+		t.Fatalf("search = %+v", ss)
+	}
+	if o := ss.OwnSite; o.WithOwnSite != 2 || o.MentionedWithOwnSite != 1 || o.WithoutOwnSite != 2 || o.MentionedWithoutOwnSite != 1 {
+		t.Errorf("own site = %+v", o)
+	}
+	if d := sum.diagnosis; d == nil || d.Answered != 4 || d.Stages != want {
+		t.Errorf("diagnosis = %+v", sum.diagnosis)
 	}
 }

@@ -28,6 +28,12 @@ package main
 //     citation lift in 2026 tests).
 //   - Blocking training crawlers is a business choice and no longer costs
 //     points; blocking the crawlers that fetch pages for AI answers does.
+//
+// Version 3 (November 2026), from the 2026 research addendum: answer
+// optimization scores the match between a page's title and key paragraph and
+// the buyer's question, and the evidence assistants use, instead of FAQ blocks
+// and summary boxes; the LLM Test's answer score leaves tone to the separate
+// sentiment rating and checks pricing claims first.
 
 import (
 	"context"
@@ -38,7 +44,7 @@ import (
 )
 
 // scoringRubricVersion is the scoring rubric new analyses are scored with.
-const scoringRubricVersion = 2
+const scoringRubricVersion = 3
 
 // visibilityComponents returns the LLM Visibility Score's dimensions with
 // their weights (re-normalised over the dimensions a domain has).
@@ -148,8 +154,9 @@ func (r *SearchVisibilityResult) adjustPillarsToV2() {
 // fetch pages for AI answers and search results, so blocking them hides the
 // site; "training" crawlers collect training data, and blocking them is a
 // business choice with no penalty. Google-Extended controls Gemini training
-// and grounding, and blocking it is associated with less AI Overview
-// retrieval, so it counts half. Unknown names don't count either way.
+// and the grounding of Gemini's answers (Google says it doesn't affect Search
+// or AI Overviews), so blocking it hides a site from one AI answer surface and
+// it counts half. Unknown names don't count either way.
 func crawlerPurpose(name string) (purpose string, weight float64) {
 	switch strings.ToLower(strings.TrimSpace(name)) {
 	case "oai-searchbot", "chatgpt-user", "claude-searchbot", "claude-user", "perplexitybot", "perplexity-user",

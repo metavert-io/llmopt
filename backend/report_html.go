@@ -193,6 +193,11 @@ type reportTest struct {
 	HasSearch    bool
 	SearchScore  int
 	Cited        []LLMTestCitedDomain
+	Diagnosis    *LLMTestSearchDiagnosis
+	// Named in this % of web-search answers citing / not citing the own site.
+	OwnRate, NoOwnRate int
+	HasOwnSplit        bool
+	Graders            string
 }
 
 // reportTestQuery is one query's answers, one entry per assistant (its runs
@@ -333,7 +338,7 @@ var dimensionNotes = map[string]string{
 	"Video Authority":   "How YouTube content shapes what AI says about you",
 	"Reddit Authority":  "How Reddit discussions shape what AI says about you",
 	"Search Visibility": "Readiness for AI Overviews and AI crawlers",
-	"LLM Test":          "What ChatGPT, Claude, Gemini and others say today",
+	"LLM Test":          "What ChatGPT, Claude, Gemini and others answer today (via their APIs)",
 }
 
 func buildReportView(d reportData, now time.Time, mode string) reportView {
@@ -469,6 +474,14 @@ func buildReportView(d reportData, now time.Time, mode string) reportView {
 		if t.SearchScore != nil {
 			tv.HasSearch, tv.SearchScore = true, *t.SearchScore
 		}
+		if d := t.SearchDiagnosis; d != nil && d.Answered > 0 {
+			tv.Diagnosis = d
+			if o := d.OwnSite; o.WithOwnSite > 0 && o.WithoutOwnSite > 0 {
+				tv.OwnRate, tv.NoOwnRate = o.MentionedWithOwnSite*100/o.WithOwnSite, o.MentionedWithoutOwnSite*100/o.WithoutOwnSite
+				tv.HasOwnSplit = true
+			}
+		}
+		tv.Graders = strings.Join(t.GraderModels, ", ")
 		if len(t.ScoreRange) == 2 {
 			tv.ScoreLow, tv.ScoreHigh, tv.HasRange = t.ScoreRange[0], t.ScoreRange[1], true
 		}
@@ -577,8 +590,8 @@ func buildOptView(opts []Optimization) *reportOpt {
 	n := len(opts)
 	ov.Average = sums[0] / n
 	ov.Dims = []reportScoreCard{
-		{Label: "Content Authority", Score: sums[1] / n, Available: true, Note: "Depth, accuracy and expertise of your answers"},
-		{Label: "Structural Optimization", Score: sums[2] / n, Available: true, Note: "How easily AI can extract and quote your pages"},
+		{Label: "Content Authority", Score: sums[1] / n, Available: true, Note: "Direct answers backed by figures, comparisons and prices"},
+		{Label: "Structural Optimization", Score: sums[2] / n, Available: true, Note: "Titles and key paragraphs that match the question"},
 		{Label: "Source Authority", Score: sums[3] / n, Available: true, Note: "Third-party signals that back you up"},
 		{Label: "Knowledge Persistence", Score: sums[4] / n, Available: true, Note: "How durably the answer sticks in model knowledge"},
 	}

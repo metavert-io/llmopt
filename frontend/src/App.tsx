@@ -665,6 +665,19 @@ interface TestProviderResult {
   citations?: string[]   // pages a web-search answer cited
   cites_own_site?: boolean
   unscored?: boolean     // the evaluator returned no verdict for it
+  searched?: boolean     // web-search answer: the model actually searched
+  stage?: TestStage      // web-search answer: how far the brand got
+}
+
+type TestStage = 'not_found' | 'found_not_named' | 'named_not_recommended' | 'recommended'
+interface TestStages { not_found: number; found_not_named: number; named_not_recommended: number; recommended: number }
+interface TestOwnSiteSplit { with_own_site: number; mentioned_with_own_site: number; without_own_site: number; mentioned_without_own_site: number }
+
+const testStageInfo: Record<TestStage, { label: string; hint: string; color: string }> = {
+  not_found: { label: 'Not found', hint: "The search didn't surface your site or a page about you: content, indexing or crawler access.", color: 'text-red-400' },
+  found_not_named: { label: 'Found, not named', hint: 'You were among the sources but left out of the answer: positioning and reputation.', color: 'text-amber-400' },
+  named_not_recommended: { label: 'Named, not recommended', hint: 'Assistants know you but prefer others: competitive standing.', color: 'text-sky-400' },
+  recommended: { label: 'Recommended', hint: 'Named and recommended.', color: 'text-emerald-400' },
 }
 
 interface TestQueryResult {
@@ -684,7 +697,7 @@ interface TestProviderSummary {
   answered?: number  // answers this provider gave (rates are over these)
   failed?: number    // answers it couldn't give
   spread?: { mention_low: number; mention_high: number; recommend_low: number; recommend_high: number; score_low: number; score_high: number; consistency: number }
-  search?: { overall_score: number; mention_rate: number; recommend_rate: number; own_site_rate: number; answered: number; failed?: number }
+  search?: { overall_score: number; mention_rate: number; recommend_rate: number; own_site_rate: number; answered: number; failed?: number; searched?: number; stages?: TestStages; own_site?: TestOwnSiteSplit }
 }
 
 interface TestUnavailableProvider {
@@ -712,6 +725,8 @@ interface LLMTestResult {
   web_search?: boolean
   search_score?: number     // overall score with web search ("searched")
   top_cited_domains?: { domain: string; answers: number; own?: boolean }[]
+  search_diagnosis?: { answered: number; searched: number; stages: TestStages; own_site: TestOwnSiteSplit }
+  grader_models?: string[]
 }
 
 type AppState = 'idle' | 'analyzing' | 'done' | 'error'
@@ -5373,6 +5388,7 @@ curl -X PATCH \\
                       <div>
                         <h3 className="text-white font-semibold text-lg">LLM Visibility Score</h3>
                         <p className="text-dark-400 text-sm">{scoreLabel(visibilityScore.score)} &middot; Based on {visibilityScore.available} of {visibilityScore.components.length} dimensions &middot; <span title="The LLM Test (what assistants actually answer) and answer optimization weigh most; Reddit less, as its share of AI citations fell in 2026. Applied to every saved analysis.">2026 weights</span></p>
+                        <p className="text-dark-500 text-xs mt-1">Assistants mostly name brands they already know: in one 2026 study, household names appeared in 73% of category answers, mid-market brands 44% and niche brands 11%. Compare your score with competitors of similar size.</p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -6131,7 +6147,7 @@ curl -X PATCH \\
                       {scoreLabel(optimization.overall_score)}
                     </h3>
                     <p className="text-dark-400 text-sm">
-                      Overall LLM Visibility Score based on content authority, structure, source authority, and knowledge persistence.
+                      How well this page answers the question for AI assistants, from content authority, structure, source authority and knowledge persistence. It measures quality and fit for the question, not a predicted citation rate.
                     </p>
                   </div>
                 </div>
@@ -10465,6 +10481,7 @@ curl -X PATCH \\
                       {(r.runs ?? 0) <= 1 && (
                         <p className="text-dark-500 text-xs mt-1">Asked once per query. AI answers vary from run to run; run the test with 3 or more runs per query for steadier numbers.</p>
                       )}
+                      <p className="text-dark-500 text-xs mt-1">Answers come from each provider's API. The consumer apps (ChatGPT, Gemini and others) can answer differently and cite different sites.</p>
                       {r.unavailable_providers && r.unavailable_providers.length > 0 && (
                         <p className="text-amber-400/80 text-xs mt-1">
                           Not included: {r.unavailable_providers.map(u => `${u.provider_name} (${u.reason})`).join('; ')}. Scores cover the providers that answered.
@@ -10605,7 +10622,7 @@ curl -X PATCH \\
                               <div className="flex justify-between"><span className="text-dark-400" title="Share of queries where the brand was mentioned (or not) in every run">Consistency</span><span className="text-white font-medium">{ps.spread.consistency}%</span></div>
                             )}
                             <div className="flex justify-between"><span className="text-dark-400">Accuracy</span><span className="text-white font-medium">{ps.accuracy_rate}%</span></div>
-                            <div className="flex justify-between"><span className="text-dark-400">Sentiment</span><span className="text-white font-medium">{ps.sentiment_score}/100</span></div>
+                            <div className="flex justify-between"><span className="text-dark-400" title="Rated separately: tone varies more between runs than anything else, so it isn't part of the score">Sentiment <span className="text-dark-600">(not in score)</span></span><span className="text-white font-medium">{ps.sentiment_score}/100</span></div>
                             {!!ps.failed && ps.failed > 0 && (
                               <div className="flex justify-between"><span className="text-dark-400">Answered</span><span className="text-amber-400/80 font-medium">{ps.answered ?? 0} of {(ps.answered ?? 0) + ps.failed} {(r.runs ?? 1) > 1 ? 'answers' : 'queries'}</span></div>
                             )}
@@ -10617,6 +10634,9 @@ curl -X PATCH \\
                                 <div className="flex justify-between"><span className="text-dark-400">Mention Rate</span><span className="text-white font-medium">{ps.search.mention_rate}%</span></div>
                                 <div className="flex justify-between"><span className="text-dark-400">Cites your site</span><span className="text-white font-medium">{ps.search.own_site_rate}%</span></div>
                               </>}
+                              {ps.search.searched !== undefined && ps.search.answered > 0 && ps.search.searched < ps.search.answered && (
+                                <div className="flex justify-between"><span className="text-dark-400" title="With search available, the model sometimes answers from memory">Actually searched</span><span className="text-white font-medium">{ps.search.searched} of {ps.search.answered}</span></div>
+                              )}
                               {!!ps.search.failed && <div className="flex justify-between"><span className="text-dark-400">Answered</span><span className="text-amber-400/80 font-medium">{ps.search.answered} of {ps.search.answered + ps.search.failed}</span></div>}
                             </div>
                           )}
@@ -10643,6 +10663,39 @@ curl -X PATCH \\
                     })}
                   </div>
 
+                  {/* Why web-search answers miss the brand */}
+                  {r.search_diagnosis && r.search_diagnosis.answered > 0 && (() => {
+                    const d = r.search_diagnosis
+                    const total = d.answered
+                    const o = d.own_site
+                    return (
+                      <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-4">
+                        <h3 className="text-white font-semibold text-sm mb-1">Why web-search answers miss you</h3>
+                        <p className="text-dark-500 text-xs mb-3">Where the brand fell out in {total} answers given with web search. Each stage points to a different fix.</p>
+                        <div className="space-y-2">
+                          {(['not_found', 'found_not_named', 'named_not_recommended', 'recommended'] as TestStage[]).map(st => {
+                            const n = d.stages[st]
+                            const info = testStageInfo[st]
+                            return (
+                              <div key={st} className="flex items-center gap-3 text-xs">
+                                <span className={`w-44 shrink-0 font-medium ${info.color}`}>{info.label}</span>
+                                <div className="flex-1 h-2 bg-dark-900 rounded-full overflow-hidden"><div className="h-full bg-primary-500/60" style={{ width: `${total ? (n * 100) / total : 0}%` }} /></div>
+                                <span className="w-8 text-right text-white font-medium">{n}</span>
+                                <span className="hidden md:block w-80 text-dark-500">{st === 'recommended' ? '' : info.hint}</span>
+                              </div>
+                            )
+                          })}
+                        </div>
+                        {o.with_own_site > 0 && o.without_own_site > 0 && (
+                          <p className="text-dark-400 text-xs mt-3">Answers that cited your own site named you <span className="text-white font-medium">{Math.round((o.mentioned_with_own_site * 100) / o.with_own_site)}%</span> of the time; answers that didn't, <span className="text-white font-medium">{Math.round((o.mentioned_without_own_site * 100) / o.without_own_site)}%</span>. A page that answers the question is one of the strongest links to being named.</p>
+                        )}
+                        {d.searched < d.answered && (
+                          <p className="text-dark-500 text-xs mt-2">In {d.searched} of {d.answered} answers the assistant actually ran a search; the rest it answered from memory with search available.</p>
+                        )}
+                      </div>
+                    )
+                  })()}
+
                   {/* Sites cited by the web-search answers */}
                   {r.top_cited_domains && r.top_cited_domains.length > 0 && (
                     <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-4">
@@ -10660,7 +10713,12 @@ curl -X PATCH \\
 
                   {/* Query results comparison */}
                   <div className="space-y-4">
-                    <h3 className="text-white font-semibold text-lg">Query Results</h3>
+                    <div>
+                      <h3 className="text-white font-semibold text-lg">Query Results</h3>
+                      {(r.runs ?? 1) <= 5 && (
+                        <p className="text-dark-500 text-xs mt-1">With {r.runs ?? 1} run{(r.runs ?? 1) > 1 ? 's' : ''} per question, a difference on a single question is indicative; the brand-level rates above are the reliable comparison.</p>
+                      )}
+                    </div>
                     {r.results.map((qr, qi) => {
                       const typeLabel: Record<string, string> = { brand: 'Brand', category: 'Category', comparison: 'Comparison', discovery: 'Discovery', custom: 'Custom' }
                       return (
@@ -10703,6 +10761,8 @@ curl -X PATCH \\
                                           {first.recommended && <span className="text-amber-400" title="Brand recommended">★ Recommended</span>}
                                           <span className={sentimentColor(first.sentiment)} title={`Sentiment: ${first.sentiment}`}>{sentimentIcon(first.sentiment)} {first.sentiment}</span>
                                           {first.cites_own_site && <span className="text-cyan-300">cites your site</span>}
+                                          {first.stage && first.stage !== 'recommended' && <span className={testStageInfo[first.stage].color} title={testStageInfo[first.stage].hint}>· {testStageInfo[first.stage].label}</span>}
+                                          {first.search && !first.searched && !first.unscored && !first.response.startsWith('Error: ') && <span className="text-dark-500" title="Search was available but the model answered from memory">· answered without searching</span>}
                                         </div>
                                       )}
                                     </div>
@@ -10749,6 +10809,9 @@ curl -X PATCH \\
                       )
                     })}
                   </div>
+                  {r.grader_models && r.grader_models.length > 0 && (
+                    <p className="text-dark-600 text-xs">Answers graded by {r.grader_models.join(', ')}.</p>
+                  )}
                 </div>
               )
             })()}
@@ -10993,7 +11056,7 @@ curl -X PATCH \\
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
           <div className="bg-dark-900 border border-dark-700 rounded-2xl p-6 max-w-sm w-full mx-4 shadow-2xl">
             <h3 className="text-white font-semibold text-lg mb-2">Test Competitor</h3>
-            <p className="text-dark-400 text-sm mb-4">Run the same test queries against a competitor to compare LLM visibility.</p>
+            <p className="text-dark-400 text-sm mb-4">Run the same test queries against a competitor to compare LLM visibility. Pick a competitor of similar size: assistants name well-known brands far more often, so comparing against a category leader mostly measures fame.</p>
             <input
               type="text"
               placeholder="competitor.com"
