@@ -789,6 +789,9 @@ type ReportFingerprint struct {
 	VideoExists          bool       `json:"video_exists" bson:"videoExists"`
 	RedditExists         bool       `json:"reddit_exists" bson:"redditExists"`
 	SearchExists         bool       `json:"search_exists" bson:"searchExists"`
+	// Engine is what made the cached PDF (reportEngineVersion, or "plain" for
+	// the fallback), so a new report design or a missing browser regenerates it.
+	Engine string `json:"engine,omitempty" bson:"engine,omitempty"`
 }
 
 // LLM Test types — multi-provider brand knowledge testing

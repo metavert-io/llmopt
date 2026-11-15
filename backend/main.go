@@ -1,6 +1,7 @@
 package main
 
 import (
+	"unicode/utf8"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -307,6 +308,7 @@ func main() {
 	// PDF Report
 	mux.HandleFunc("POST /api/domains/{domain}/report/pdf", withAuth(withRL(ratelimit.PDFGenerateLimit, handleGeneratePDF(mongoDB))))
 	mux.HandleFunc("GET /api/domains/{domain}/report/pdf/{id}", withAuth(handleServePDF(mongoDB)))
+	mux.HandleFunc("GET /api/domains/{domain}/report/html", withAuth(withRL(ratelimit.APIReadLimit, handleReportHTML(mongoDB))))
 
 	// User Access Keys (lok_ keys for MCP server access)
 	mux.HandleFunc("GET /api/user/access-keys", withAuth(handleListUserAccessKeys(mongoDB)))
@@ -394,6 +396,7 @@ func main() {
 	mux.HandleFunc("GET /api/share/popular/{domain}/screenshot", withRL(ratelimit.APIReadLimit, handleServeBrandScreenshot(mongoDB)))
 	mux.HandleFunc("GET /api/share/{shareId}", withRL(ratelimit.APIReadLimit, handleGetSharedDomain(mongoDB)))
 	mux.HandleFunc("GET /api/share/{shareId}/pdf", withRL(ratelimit.APIReadLimit, handleServeSharedPDF(mongoDB)))
+	mux.HandleFunc("GET /api/share/{shareId}/report", withRL(ratelimit.APIReadLimit, handleSharedReportHTML(mongoDB)))
 
 	// OPTIONS handlers (CORS preflight — no auth)
 	// Note: OPTIONS /api/config already registered above with the GET handler
@@ -444,6 +447,7 @@ func main() {
 	mux.HandleFunc("OPTIONS /api/failed-analyses/{id}", handleOptions)
 	mux.HandleFunc("OPTIONS /api/domains/{domain}/report/pdf", handleOptions)
 	mux.HandleFunc("OPTIONS /api/domains/{domain}/report/pdf/{id}", handleOptions)
+	mux.HandleFunc("OPTIONS /api/domains/{domain}/report/html", handleOptions)
 	mux.HandleFunc("OPTIONS /api/visibility-score/{domain}", handleOptions)
 	mux.HandleFunc("OPTIONS /api/providers/models", handleOptions)
 	mux.HandleFunc("OPTIONS /api/test", handleOptions)
@@ -2557,13 +2561,13 @@ func todoSummary(action, impact string) string {
 	if idx := strings.Index(a, ". "); idx > 0 && idx < 120 {
 		a = a[:idx+1]
 	} else if len(a) > 120 {
-		a = a[:117] + "..."
+		a = cutAtRune(a, 117) + "..."
 	}
 	// Append abbreviated impact if room
 	if impact != "" {
 		imp := impact
 		if len(imp) > 80 {
-			imp = imp[:77] + "..."
+			imp = cutAtRune(imp, 77) + "..."
 		}
 		return a + " → " + imp
 	}
@@ -8974,131 +8978,10 @@ func handleVisibilityScore(mongoDB *MongoDB) http.HandlerFunc {
 		}
 		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)
 		defer cancel()
-		tenantID := saas.TenantIDFromContext(r.Context())
-
-		type component struct {
-			Name      string  `json:"name"`
-			Score     int     `json:"score"`
-			Weight    float64 `json:"weight"`
-			Available bool    `json:"available"`
-		}
-
-		components := []component{
-			{Name: "Optimization", Weight: 0.30},
-			{Name: "Video Authority", Weight: 0.20},
-			{Name: "Reddit Authority", Weight: 0.20},
-			{Name: "Search Visibility", Weight: 0.15},
-			{Name: "LLM Test", Weight: 0.15},
-		}
-
-		// 1. Optimization average score
-		cursor, err := mongoDB.Optimizations().Find(ctx,
-			tenantFilter(r.Context(), bson.D{{Key: "domain", Value: domain}}),
-			options.Find().SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-		)
-		if err == nil {
-			var opts []struct {
-				Result struct {
-					OverallScore int `bson:"overallScore"`
-				} `bson:"result"`
-			}
-			if cursor.All(ctx, &opts) == nil && len(opts) > 0 {
-				total := 0
-				for _, o := range opts {
-					total += o.Result.OverallScore
-				}
-				components[0].Score = total / len(opts)
-				components[0].Available = true
-			}
-		}
-
-		// 2. Video authority (latest)
-		var va struct {
-			Result *struct {
-				OverallScore int `bson:"overallScore"`
-			} `bson:"result"`
-		}
-		if mongoDB.VideoAnalyses().FindOne(ctx,
-			bson.D{{Key: "domain", Value: domain}, {Key: "tenantId", Value: tenantID}},
-			options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-		).Decode(&va) == nil && va.Result != nil {
-			components[1].Score = va.Result.OverallScore
-			components[1].Available = true
-		}
-
-		// 3. Reddit authority (latest)
-		var ra struct {
-			Result *struct {
-				OverallScore int `bson:"overallScore"`
-			} `bson:"result"`
-		}
-		if mongoDB.RedditAnalyses().FindOne(ctx,
-			bson.D{{Key: "domain", Value: domain}, {Key: "tenantId", Value: tenantID}},
-			options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-		).Decode(&ra) == nil && ra.Result != nil {
-			components[2].Score = ra.Result.OverallScore
-			components[2].Available = true
-		}
-
-		// 4. Search visibility (latest)
-		var sa struct {
-			Result *struct {
-				OverallScore int `bson:"overallScore"`
-			} `bson:"result"`
-		}
-		if mongoDB.SearchAnalyses().FindOne(ctx,
-			bson.D{{Key: "domain", Value: domain}, {Key: "tenantId", Value: tenantID}},
-			options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-		).Decode(&sa) == nil && sa.Result != nil {
-			components[3].Score = sa.Result.OverallScore
-			components[3].Available = true
-		}
-
-		// 5. LLM Test (latest non-competitor)
-		var lt struct {
-			OverallScore int `bson:"overallScore"`
-		}
-		if mongoDB.LLMTests().FindOne(ctx,
-			bson.D{
-				{Key: "domain", Value: domain},
-				{Key: "tenantId", Value: tenantID},
-				{Key: "competitorOf", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}},
-			},
-			options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "overallScore", Value: 1}}),
-		).Decode(&lt) == nil {
-			components[4].Score = lt.OverallScore
-			components[4].Available = true
-		}
-
-		// Compute weighted score (re-weight proportionally for available components only)
-		totalWeight := 0.0
-		weightedSum := 0.0
-		for _, c := range components {
-			if c.Available {
-				totalWeight += c.Weight
-				weightedSum += float64(c.Score) * c.Weight
-			}
-		}
-
-		score := 0
-		if totalWeight > 0 {
-			score = int(weightedSum / totalWeight)
-		}
-
-		availableCount := 0
-		for _, c := range components {
-			if c.Available {
-				availableCount++
-			}
-		}
-
+		// Shared with the report (report_data.go), so both always agree.
+		vs := computeVisibilityScore(ctx, mongoDB, domain, r.Context())
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]any{
-			"score":      score,
-			"components": components,
-			"available":  availableCount,
-			"total":      len(components),
-		})
+		json.NewEncoder(w).Encode(vs)
 	}
 }
 
@@ -9106,7 +8989,23 @@ func truncateStr(s string, maxLen int) string {
 	if len(s) <= maxLen {
 		return s
 	}
-	return s[:maxLen-3] + "..."
+	return cutAtRune(s, maxLen-3) + "..."
+}
+
+// cutAtRune returns at most n bytes of s, never splitting a character (a cut
+// through an em dash or curly quote leaves invalid UTF-8, shown as "â€"-style
+// garbage or "�").
+func cutAtRune(s string, n int) string {
+	if n >= len(s) {
+		return s
+	}
+	if n < 0 {
+		n = 0
+	}
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 func buildTestEvaluationPrompt(brandName, domain string, brandInfo BrandContextInfo, queries []LLMTestQuery, responses []testRawResponse) string {

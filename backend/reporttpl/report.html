@@ -1,0 +1,469 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>{{.BrandName}} · AI Visibility Report</title>
+<style>
+{{.FontCSS}}
+:root {
+  --ink: #0f172a; --ink2: #334155; --muted: #64748b; --faint: #94a3b8; --line: #e2e8f0; --soft: #f8fafc;
+  --brand: #0284c7; --brand2: #7c3aed;
+  --g: #059669; --g-bg: #ecfdf5; --g-bd: #a7f3d0;
+  --a: #d97706; --a-bg: #fffbeb; --a-bd: #fde68a;
+  --o: #ea580c; --o-bg: #fff7ed; --o-bd: #fed7aa;
+  --r: #dc2626; --r-bg: #fef2f2; --r-bd: #fecaca;
+  --n: #64748b; --n-bg: #f1f5f9; --n-bd: #e2e8f0;
+}
+@page { size: A4; margin: 16mm 14mm 18mm 14mm; }
+@page :first { margin: 0; }
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: 'Inter', -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  color: var(--ink2); font-size: 9.5pt; line-height: 1.5; background: #fff;
+  -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  font-feature-settings: "tnum" 1, "cv11" 1;
+  overflow-wrap: anywhere; word-break: break-word;
+}
+img, table { max-width: 100%; }
+.comp > *, .action > *, .q > *, .bar > * { min-width: 0; }
+a { color: var(--brand); text-decoration: none; }
+h1, h2, h3, h4 { color: var(--ink); margin: 0; line-height: 1.2; }
+p { margin: 0 0 8px; }
+
+/* Sheets: one per major part. Printed, each starts a new page; on the web,
+   they're cards on a grey desk. */
+.sheet { break-before: page; }
+.sheet.cover { break-before: auto; }
+.web body, body.web { background: #e9eef5; }
+body.web .sheet { max-width: 210mm; margin: 18px auto; background: #fff; padding: 16mm 14mm; border-radius: 10px; box-shadow: 0 2px 12px rgba(15,23,42,.08); }
+body.web .sheet.cover { padding: 22mm 18mm 16mm; overflow: hidden; background: var(--cover-bg); }
+.avoid { break-inside: avoid; }
+.clamp1, .clamp2, .clamp3, .clamp4 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp1 { -webkit-line-clamp: 1; } .clamp2 { -webkit-line-clamp: 2; } .clamp3 { -webkit-line-clamp: 3; } .clamp4 { -webkit-line-clamp: 4; }
+
+/* Score colours (the app's bands: 80+ / 60+ / 40+ / below) */
+.t-g { color: var(--g); } .t-a { color: var(--a); } .t-o { color: var(--o); } .t-r { color: var(--r); } .t-n { color: var(--n); }
+.chip { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 7.5pt; font-weight: 600; border: 1px solid; white-space: nowrap; line-height: 1.6;
+  max-width: 100%; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+.chip.g { color: var(--g); background: var(--g-bg); border-color: var(--g-bd); }
+.chip.a { color: var(--a); background: var(--a-bg); border-color: var(--a-bd); }
+.chip.o { color: var(--o); background: var(--o-bg); border-color: var(--o-bd); }
+.chip.r { color: var(--r); background: var(--r-bg); border-color: var(--r-bd); }
+.chip.n { color: var(--n); background: var(--n-bg); border-color: var(--n-bd); }
+.chip.high { color: var(--r); background: var(--r-bg); border-color: var(--r-bd); }
+.chip.medium { color: var(--a); background: var(--a-bg); border-color: var(--a-bd); }
+.chip.low { color: var(--n); background: var(--n-bg); border-color: var(--n-bd); }
+.chip.src { color: var(--brand); background: #f0f9ff; border-color: #bae6fd; }
+
+/* Section heads */
+.section-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; padding-bottom: 8px; margin-bottom: 14px; border-bottom: 2px solid var(--ink); }
+.eyebrow { font-size: 7.5pt; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); margin-bottom: 3px; }
+.section-head h2 { font-size: 19pt; font-weight: 800; letter-spacing: -.01em; }
+.section-head .lede { color: var(--muted); font-size: 9pt; margin-top: 3px; }
+.badge-score { text-align: right; }
+.badge-score .num { font-size: 24pt; font-weight: 800; line-height: 1; }
+.badge-score .den { font-size: 9pt; color: var(--faint); font-weight: 600; }
+.badge-score .lbl { font-size: 7.5pt; color: var(--muted); text-transform: uppercase; letter-spacing: .08em; font-weight: 600; }
+h3 { font-size: 11pt; font-weight: 700; margin: 16px 0 8px; display: flex; align-items: center; gap: 8px; }
+h3, .group-head, .section-head, .sub { break-after: avoid; page-break-after: avoid; }
+h3::before { content: ""; width: 3px; height: 13px; border-radius: 2px; background: var(--brand); display: inline-block; }
+
+/* Score cards */
+.grid { display: grid; gap: 8px; }
+/* minmax(0,1fr): long unbroken words must not widen a column (Chrome would
+   then shrink every page to fit). */
+.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } .g3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.g4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } .g5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.card { border: 1px solid var(--line); border-radius: 10px; background: #fff; padding: 10px 12px; break-inside: avoid; }
+.score-card { border-top: 3px solid var(--line); }
+.score-card.g { border-top-color: var(--g); } .score-card.a { border-top-color: var(--a); }
+.score-card.o { border-top-color: var(--o); } .score-card.r { border-top-color: var(--r); }
+.score-card .num { font-size: 20pt; font-weight: 800; line-height: 1.05; }
+.score-card .den { font-size: 8pt; color: var(--faint); font-weight: 600; }
+.score-card .lbl { font-size: 8.5pt; font-weight: 700; color: var(--ink); margin-top: 4px; }
+.score-card .note { font-size: 7.5pt; color: var(--muted); margin-top: 2px; line-height: 1.35; font-style: normal; }
+.score-card .meter { height: 4px; border-radius: 3px; background: #eef2f7; margin-top: 6px; overflow: hidden; }
+.score-card .meter > i { display: block; height: 100%; border-radius: 3px; }
+.score-card.missing { border: 1px dashed #cbd5e1; border-top: 3px dashed #cbd5e1; background: var(--soft); }
+.score-card.missing .num { font-size: 10pt; color: var(--faint); font-weight: 700; padding: 6px 0 3px; }
+.fill-g { background: var(--g); } .fill-a { background: var(--a); } .fill-o { background: var(--o); } .fill-r { background: var(--r); } .fill-n { background: #94a3b8; } .fill-b { background: var(--brand); }
+
+/* Hero score (cover and executive summary) */
+.hero { display: flex; align-items: center; gap: 18px; }
+.ring { --c: var(--n); width: 112px; height: 112px; border-radius: 50%; flex: none;
+  background: conic-gradient(var(--c) calc(var(--p) * 1%), #e2e8f0 0); display: grid; place-items: center; }
+.ring.g { --c: var(--g); } .ring.a { --c: var(--a); } .ring.o { --c: var(--o); } .ring.r { --c: var(--r); }
+.ring > div { width: 86px; height: 86px; border-radius: 50%; background: #fff; display: grid; place-items: center; text-align: center; }
+.ring .num { font-size: 27pt; font-weight: 800; line-height: 1; color: var(--ink); }
+.ring .den { font-size: 7.5pt; color: var(--faint); font-weight: 600; }
+.hero .title { font-size: 13pt; font-weight: 800; color: var(--ink); }
+.hero .verdict { font-size: 10pt; font-weight: 700; margin-top: 2px; }
+.hero .basis { font-size: 8pt; color: var(--muted); margin-top: 3px; }
+
+/* Bars */
+.bars { display: grid; gap: 6px; }
+.bar { display: grid; grid-template-columns: 34% minmax(0, 1fr) 54px; gap: 10px; align-items: center; break-inside: avoid; }
+.bar .label { font-size: 8.5pt; color: var(--ink); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .label small { display: block; font-weight: 400; color: var(--muted); font-size: 7.5pt; }
+.track { height: 10px; border-radius: 6px; background: #eef2f7; overflow: hidden; }
+.track > i { display: block; height: 100%; border-radius: 6px; }
+.bar .val { font-size: 8.5pt; font-weight: 700; text-align: right; color: var(--ink); }
+.stack { display: flex; height: 12px; border-radius: 6px; overflow: hidden; margin: 6px 0 4px; }
+.stack > i { display: block; height: 100%; }
+.legend { display: flex; gap: 14px; font-size: 7.5pt; color: var(--muted); }
+.legend b { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; font-size: 8.5pt; table-layout: fixed; }
+th { text-align: left; font-size: 7pt; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 700; padding: 6px 8px; border-bottom: 1px solid var(--line); background: var(--soft); }
+td { padding: 6px 8px; border-bottom: 1px solid #f1f5f9; vertical-align: top; }
+tr { break-inside: avoid; }
+td.num, th.num { text-align: right; white-space: nowrap; }
+td.mini { width: 120px; }
+
+/* Callouts, quotes, actions */
+.callout { border-left: 3px solid var(--brand2); background: #faf5ff; border-radius: 0 10px 10px 0; padding: 10px 14px; break-inside: avoid; }
+.callout .k { font-size: 7.5pt; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--brand2); margin-bottom: 4px; }
+.prose p { color: var(--ink2); }
+.note { font-size: 7.5pt; color: var(--muted); font-style: italic; margin-top: 8px; }
+.tags { display: flex; flex-wrap: wrap; gap: 5px; }
+.tag { font-size: 7.5pt; padding: 2px 8px; border-radius: 999px; background: #f1f5f9; color: var(--ink2); border: 1px solid var(--line); }
+.actions { counter-reset: act; display: grid; gap: 8px; }
+.action { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; break-inside: avoid; }
+.action .n { width: 22px; height: 22px; border-radius: 6px; background: var(--ink); color: #fff; font-weight: 800; font-size: 9pt; display: grid; place-items: center; }
+.action .what { font-weight: 600; color: var(--ink); font-size: 9pt; }
+.action .why { font-size: 8pt; color: var(--muted); margin-top: 2px; }
+.top-actions { background: linear-gradient(135deg, #f0f9ff, #faf5ff); border: 1px solid #e0e7ff; border-radius: 12px; padding: 12px 14px; }
+.top-actions .k { font-size: 7.5pt; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; color: var(--brand); margin-bottom: 8px; }
+.rec { border: 1px solid var(--line); border-left: 3px solid var(--n); border-radius: 0 10px 10px 0; padding: 8px 12px; break-inside: avoid; }
+.rec.high { border-left-color: var(--r); } .rec.medium { border-left-color: var(--a); } .rec.low { border-left-color: var(--faint); }
+.rec .what { font-weight: 600; color: var(--ink); font-size: 9pt; margin: 3px 0 2px; }
+.rec .why { font-size: 8pt; color: var(--muted); }
+.group-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 8px; font-weight: 800; color: var(--ink); font-size: 10pt; }
+.quote { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; break-inside: avoid; }
+.quote .meta { display: flex; gap: 5px; flex-wrap: wrap; align-items: center; margin-bottom: 4px; }
+.quote .title { font-weight: 600; color: var(--ink); font-size: 8.5pt; }
+.quote .ctx { font-size: 8pt; color: var(--muted); font-style: italic; margin-top: 3px; }
+
+/* Optimization cards */
+.qcard { border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; break-inside: avoid; margin-bottom: 10px; }
+.qcard .q { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.qcard .q h4 { font-size: 10pt; font-weight: 700; }
+.qcard .q .sc { font-size: 18pt; font-weight: 800; line-height: 1; white-space: nowrap; }
+.qcard .q .sc small { font-size: 8pt; color: var(--faint); }
+.qcard .dims { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 9px 0 4px; }
+.qcard .dims .d { font-size: 7.5pt; color: var(--muted); }
+.qcard .dims .d b { display: block; font-size: 10pt; }
+.qcard .sub { font-size: 7.5pt; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 8px 0 4px; }
+.comp { display: flex; gap: 8px; align-items: baseline; font-size: 8pt; padding: 2px 0; }
+.comp .dom { font-weight: 600; color: var(--ink); min-width: 120px; }
+.comp .str { color: var(--muted); }
+ul.plain { margin: 0; padding-left: 16px; } ul.plain li { margin: 2px 0; font-size: 8.5pt; }
+
+/* Contents */
+.toc { list-style: none; margin: 0; padding: 0; }
+.toc li { display: flex; align-items: center; gap: 12px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.toc .i { width: 26px; height: 26px; border-radius: 8px; background: var(--soft); border: 1px solid var(--line); display: grid; place-items: center; font-weight: 800; color: var(--ink); font-size: 9pt; }
+.toc a { font-weight: 600; color: var(--ink); font-size: 11pt; }
+.toc .missing { color: var(--faint); font-weight: 500; }
+
+/* Cover */
+:root { --cover-bg: radial-gradient(1200px 600px at 110% -10%, rgba(124,58,237,.45), transparent 60%),
+              radial-gradient(900px 600px at -20% 110%, rgba(2,132,199,.45), transparent 60%),
+              linear-gradient(160deg, #0b1220 0%, #111a2e 55%, #0b1220 100%); }
+.cover { height: 297mm; padding: 22mm 18mm 16mm; color: #e2e8f0; position: relative; overflow: hidden;
+  background: var(--cover-bg); display: flex; flex-direction: column; }
+body.web .cover { height: auto; min-height: 250mm; }
+.cover .mark { display: flex; align-items: center; gap: 10px; color: #fff; font-weight: 800; font-size: 11pt; }
+.cover .mark i { width: 30px; height: 30px; border-radius: 9px; background: linear-gradient(135deg, #38bdf8, #8b5cf6); display: inline-block; }
+.cover .kicker { margin-top: 30mm; font-size: 9pt; font-weight: 800; letter-spacing: .25em; text-transform: uppercase; color: #7dd3fc; }
+.cover h1 { color: #fff; font-size: 34pt; font-weight: 800; letter-spacing: -.02em; margin-top: 8px; line-height: 1.05; }
+.cover .domain { font-size: 12pt; color: #94a3b8; margin-top: 8px; }
+.cover .panel { margin-top: 16mm; background: rgba(255,255,255,.97); border-radius: 16px; padding: 16px 18px; color: var(--ink2); box-shadow: 0 20px 50px rgba(0,0,0,.35); }
+.cover .panel .grid { margin-top: 14px; }
+.cover .panel .score-card { padding: 8px 9px; }
+.cover .panel .score-card .num { font-size: 15pt; }
+.cover .panel .score-card .note { display: none; }
+.cover .foot { margin-top: auto; display: flex; justify-content: space-between; align-items: flex-end; font-size: 8pt; color: #94a3b8; gap: 20px; }
+.cover .foot b { color: #e2e8f0; }
+.cover .foot a { color: #7dd3fc; }
+</style>
+</head>
+<body class="{{.Mode}}">
+
+<!-- Cover -->
+<section class="sheet cover">
+  <div class="mark"><i></i> LLM Optimizer</div>
+  <div class="kicker">AI Visibility Report</div>
+  <h1>{{.BrandName}}</h1>
+  <div class="domain">{{.Domain}} · {{.Generated}}</div>
+  <div class="panel">
+    {{if .Visibility.Available}}
+    <div class="hero">
+      <div class="ring {{scoreClass .Visibility.Score}}" style="--p: {{pct .Visibility.Score}}"><div><div><div class="num">{{.Visibility.Score}}</div><div class="den">/ 100</div></div></div></div>
+      <div>
+        <div class="title">LLM Visibility Score</div>
+        <div class="verdict t-{{scoreClass .Visibility.Score}}">{{verdict .Visibility.Score}}</div>
+        <div class="basis">{{.VisBasis}} · how likely AI assistants are to know, cite and recommend {{.BrandName}}</div>
+      </div>
+    </div>
+    {{else}}
+    <div class="hero"><div><div class="title">LLM Visibility Score</div><div class="basis">No dimensions have been run yet.</div></div></div>
+    {{end}}
+    <div class="grid g5">{{range .Dimensions}}{{template "card" .}}{{end}}</div>
+  </div>
+  <div class="foot">
+    <div>{{if .Models}}<b>AI models used:</b> {{range $i, $m := .Models}}{{if $i}}, {{end}}{{$m}}{{end}}{{end}}</div>
+    <div style="text-align:right">Powered by <b>LLM Optimizer</b> · <a href="https://llmopt.metavert.io">llmopt.metavert.io</a><br>Open source (MIT): <a href="https://github.com/metavert-io/llmopt">github.com/metavert-io/llmopt</a></div>
+  </div>
+</section>
+
+<!-- Contents -->
+<section class="sheet">
+  <div class="section-head"><div><div class="eyebrow">{{.BrandName}}</div><h2>Contents</h2></div></div>
+  <ol class="toc">
+    {{range $i, $t := .TOC}}
+    <li><span class="i">{{inc $i}}</span>
+      {{if $t.Missing}}<span class="missing">{{$t.Title}}</span> <span class="chip n">Not yet generated</span>
+      {{else}}<a href="#{{$t.ID}}">{{$t.Title}}</a>{{end}}
+    </li>
+    {{end}}
+  </ol>
+</section>
+
+<!-- Executive summary -->
+<section class="sheet" id="executive-summary">
+  <div class="section-head"><div><div class="eyebrow">At a glance</div><h2>Executive Summary</h2><div class="lede">Where {{.BrandName}} stands with AI assistants, and what to do first.</div></div></div>
+  <div class="card" style="padding:14px 16px">
+    {{if .Visibility.Available}}
+    <div class="hero">
+      <div class="ring {{scoreClass .Visibility.Score}}" style="--p: {{pct .Visibility.Score}}"><div><div><div class="num">{{.Visibility.Score}}</div><div class="den">/ 100</div></div></div></div>
+      <div>
+        <div class="title">LLM Visibility Score</div>
+        <div class="verdict t-{{scoreClass .Visibility.Score}}">{{verdict .Visibility.Score}}</div>
+        <div class="basis">{{.VisBasis}}{{with .Summary}}{{if .Average}} · answer optimization average {{.Average}}{{if .RangeHigh}} (range {{.RangeLow}}–{{.RangeHigh}}){{end}}{{end}}{{end}}</div>
+      </div>
+    </div>
+    {{end}}
+    <div class="grid g5" style="margin-top:12px">{{range .Dimensions}}{{template "card" .}}{{end}}</div>
+  </div>
+
+  {{if .TopActions}}
+  <div class="top-actions" style="margin-top:12px">
+    <div class="k">Top {{len .TopActions}} actions</div>
+    <div class="actions">
+      {{range $i, $a := .TopActions}}
+      <div class="action"><div class="n">{{inc $i}}</div><div>
+        <div class="what">{{$a.Action}} <span class="chip {{$a.Priority}}">{{title $a.Priority}}</span>{{if $a.Source}} <span class="chip src">{{$a.Source}}</span>{{end}}</div>
+        {{if $a.Impact}}<div class="why">{{$a.Impact}}</div>{{end}}
+      </div></div>
+      {{end}}
+    </div>
+  </div>
+  {{end}}
+
+  {{with .Summary}}
+    {{if .Text}}<h3>Summary</h3><div class="prose"><p>{{.Text}}</p></div>{{end}}
+    {{if .Themes}}
+    <h3>Key themes</h3>
+    <div class="grid g2">
+      {{range .Themes}}<div class="card"><div style="font-weight:700;color:var(--ink);font-size:9pt">{{.Title}}</div>{{if .Description}}<div style="font-size:8.5pt;margin-top:3px">{{.Description}}</div>{{end}}</div>{{end}}
+    </div>
+    {{end}}
+  {{else}}
+    <p class="note">The AI-written executive summary hasn't been generated for this domain yet. Generate it on the Analyze tab to add it here.</p>
+  {{end}}
+</section>
+
+{{with .Site}}
+<section class="sheet" id="site-analysis">
+  <div class="section-head"><div><div class="eyebrow">Your site</div><h2>Site Analysis</h2><div class="lede">The questions people ask AI that your site could answer.</div></div></div>
+  <div class="grid g3" style="margin-bottom:12px">
+    <div class="card"><div style="font-size:20pt;font-weight:800;color:var(--ink)">{{len .Questions}}</div><div style="font-size:8pt;color:var(--muted)">questions discovered</div></div>
+    <div class="card"><div style="font-size:20pt;font-weight:800;color:var(--ink)">{{.PagesCrawled}}</div><div style="font-size:8pt;color:var(--muted)">pages crawled</div></div>
+  </div>
+  {{if .Summary}}<div class="callout"><div class="k">Site summary</div>{{.Summary}}</div>{{end}}
+  {{if .Questions}}
+  <h3>Questions discovered</h3>
+  <table>
+    <thead><tr><th style="width:42%">Question</th><th style="width:16%">Category</th><th>Why it matters</th></tr></thead>
+    <tbody>{{range .Questions}}<tr><td style="color:var(--ink)">{{.Question}}</td><td><span class="tag">{{.Category}}</span></td>
+      <td>{{if eq .Relevance "high"}}<span class="chip g">High</span>{{else if eq .Relevance "medium"}}<span class="chip a">Medium</span>{{else if eq .Relevance "low"}}<span class="chip n">Low</span>{{else}}<span class="clamp2" style="color:var(--muted);font-size:8pt">{{.Relevance}}</span>{{end}}</td></tr>{{end}}</tbody>
+  </table>
+  {{end}}
+</section>
+{{end}}
+
+{{with .Opt}}
+<section class="sheet" id="optimization">
+  <div class="section-head">
+    <div><div class="eyebrow">Your answers</div><h2>Answer Optimization</h2><div class="lede">How likely AI is to surface and cite your answer, for {{.Count}} questions.</div></div>
+    <div class="badge-score"><div class="num t-{{scoreClass .Average}}">{{.Average}}<span class="den"> / 100</span></div><div class="lbl">Average</div></div>
+  </div>
+  <div class="grid g4">{{range .Dims}}{{template "card" .}}{{end}}</div>
+  <h3>Every question, weakest first</h3>
+  <table>
+    <thead><tr><th>#</th><th>Question</th><th class="mini">Score</th><th class="num"></th></tr></thead>
+    <tbody>
+    {{range $i, $r := .Ranked}}<tr><td style="color:var(--faint)">{{inc $i}}</td><td><a href="#{{$r.Anchor}}" style="color:var(--ink)">{{$r.Question}}</a></td>
+      <td class="mini"><div class="track"><i class="fill-{{scoreClass $r.Score}}" style="width: {{pct $r.Score}}%"></i></div></td>
+      <td class="num"><span class="chip {{scoreClass $r.Score}}">{{$r.Score}}</span></td></tr>{{end}}
+    </tbody>
+  </table>
+  {{if .Weakest}}
+  <h3 style="break-before: page">The {{len .Weakest}} weakest, in detail</h3>
+  {{range .Weakest}}{{template "qcard" .}}{{end}}
+  {{end}}
+</section>
+{{end}}
+
+{{with .Video}}
+<section class="sheet" id="youtube">
+  <div class="section-head">
+    <div><div class="eyebrow">Video</div><h2>YouTube Video Authority</h2><div class="lede">YouTube is the most-cited social source in AI answers; this is what it says about you.</div></div>
+    <div class="badge-score"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Overall</div></div>
+  </div>
+  <div class="grid g4">{{range .Pillars}}{{template "card" .}}{{end}}</div>
+  {{if .Summary}}<h3>Summary</h3><div class="prose"><p>{{.Summary}}</p></div>{{end}}
+  {{if .Narrative}}
+  <div class="callout" style="margin-top:10px"><div class="k">What LLMs probably believe about you</div>{{.Narrative}}
+    {{with .Sentiment}}
+    <div class="stack"><i class="fill-g" style="width: {{pct .Positive}}%"></i><i class="fill-n" style="width: {{pct .Neutral}}%"></i><i class="fill-r" style="width: {{pct .Negative}}%"></i></div>
+    <div class="legend"><span><b class="fill-g"></b>{{.Positive}}% positive</span><span><b class="fill-n"></b>{{.Neutral}}% neutral</span><span><b class="fill-r"></b>{{.Negative}}% negative</span><span>across {{.Total}} mentions</span></div>
+    {{end}}
+  </div>
+  {{end}}
+  {{if .Themes}}<h3>Key themes</h3><div class="tags">{{range .Themes}}<span class="tag">{{.}}</span>{{end}}</div>{{end}}
+  {{if .SOV}}<h3>Share of voice</h3><div class="bars">{{range .SOV}}{{template "bar" .}}{{end}}</div>{{end}}
+  {{if .Gaps}}<h3>Content gap opportunities</h3><div class="grid g2">{{range .Gaps}}<div class="rec medium"><div class="what">{{.Action}}</div>{{if .Impact}}<div class="why">{{.Impact}}</div>{{end}}</div>{{end}}</div>{{end}}
+  {{if .Creators}}<h3>Creators who mention you (authority)</h3><div class="bars">{{range .Creators}}{{template "scorebar" .}}{{end}}</div>{{end}}
+  {{if .Targets}}<h3>Creator outreach targets</h3><div class="grid g2">{{range .Targets}}<div class="rec low"><div class="what">{{.Action}}</div>{{if .Impact}}<div class="why">{{.Impact}}</div>{{end}}</div>{{end}}</div>{{end}}
+  {{if .Scorecards}}<h3>Video scorecards</h3><div class="bars">{{range .Scorecards}}{{template "scorebar" .}}{{end}}</div>{{end}}
+  {{if .Note}}<p class="note">Note: {{.Note}}</p>{{end}}
+</section>
+{{end}}
+
+{{with .Reddit}}
+<section class="sheet" id="reddit">
+  <div class="section-head">
+    <div><div class="eyebrow">Community</div><h2>Reddit Authority</h2><div class="lede">Reddit threads, especially "best X for Y", weigh heavily in what AI recommends.</div></div>
+    <div class="badge-score"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Overall</div></div>
+  </div>
+  <div class="grid g4">{{range .Pillars}}{{template "card" .}}{{end}}</div>
+  {{if .Summary}}<h3>Summary</h3><div class="prose"><p>{{.Summary}}</p></div>{{end}}
+  {{if .SOV}}<h3>Share of voice</h3><div class="bars">{{range .SOV}}{{template "bar" .}}{{end}}</div>{{end}}
+  {{if .Mentions}}
+  <h3>Notable mentions</h3>
+  <div class="grid g2">
+    {{range .Mentions}}<div class="quote"><div class="meta"><span class="chip src">r/{{.Subreddit}}</span><span class="chip {{sentimentClass .Sentiment}}">{{title .Sentiment}}</span>{{if .IsRecommendation}}<span class="chip g">Recommends</span>{{end}}</div>
+      <div class="title">{{.Title}}</div>{{if .Context}}<div class="ctx">“{{.Context}}”</div>{{end}}</div>{{end}}
+  </div>
+  {{end}}
+  {{if .Note}}<p class="note">Note: {{.Note}}</p>{{end}}
+</section>
+{{end}}
+
+{{with .Search}}
+<section class="sheet" id="search">
+  <div class="section-head">
+    <div><div class="eyebrow">Search</div><h2>Search Visibility</h2><div class="lede">Google's AI Overviews draw on the search results, and AI crawlers need access to your pages.</div></div>
+    <div class="badge-score"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Overall</div></div>
+  </div>
+  <div class="grid {{if eq (len .Pillars) 5}}g5{{else}}g4{{end}}">{{range .Pillars}}{{template "card" .}}{{end}}</div>
+  {{if .Summary}}<h3>Summary</h3><div class="prose"><p>{{.Summary}}</p></div>{{end}}
+  {{if .Crawlers}}
+  <h3>AI crawler access</h3>
+  <table><thead><tr><th>Crawler</th><th>Access</th><th>Notes</th></tr></thead>
+    <tbody>{{range .Crawlers}}<tr><td style="font-weight:600;color:var(--ink)">{{.Name}}</td><td>{{if .Allowed}}<span class="chip g">Allowed</span>{{else}}<span class="chip r">Blocked</span>{{end}}</td><td style="color:var(--muted)">{{.Notes}}</td></tr>{{end}}</tbody>
+  </table>
+  {{end}}
+  {{if .Note}}<p class="note">Note: {{.Note}}</p>{{end}}
+</section>
+{{end}}
+
+{{with .Test}}
+<section class="sheet" id="llm-test">
+  <div class="section-head">
+    <div><div class="eyebrow">Live test</div><h2>LLM Brand Test</h2><div class="lede">What today's AI assistants actually say when asked about you and your category.</div></div>
+    <div class="badge-score"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Overall</div></div>
+  </div>
+  <div class="grid {{if ge (len .Providers) 4}}g4{{else}}g3{{end}}">
+    {{range .Providers}}<div class="card score-card {{scoreClass .OverallScore}}"><div class="num t-{{scoreClass .OverallScore}}">{{.OverallScore}}<span class="den"> / 100</span></div><div class="lbl">{{.ProviderName}}</div><div class="note">{{.Model}}</div><div class="meter"><i class="fill-{{scoreClass .OverallScore}}" style="width: {{pct .OverallScore}}%"></i></div></div>{{end}}
+  </div>
+  <h3>Mentioned and recommended, by assistant</h3>
+  <div class="bars">
+    {{range .Providers}}
+    <div class="bar"><div class="label">{{.ProviderName}}<small>mentioned you</small></div><div class="track"><i class="fill-b" style="width: {{pct .MentionRate}}%"></i></div><div class="val">{{.MentionRate}}%</div></div>
+    <div class="bar"><div class="label" style="color:var(--muted);font-weight:500">&nbsp;<small>recommended you</small></div><div class="track"><i class="fill-g" style="width: {{pct .RecommendRate}}%"></i></div><div class="val">{{.RecommendRate}}%</div></div>
+    {{end}}
+  </div>
+  <table style="margin-top:10px"><thead><tr><th>Assistant</th><th class="num">Accuracy</th><th class="num">Sentiment</th><th class="num">Answered</th></tr></thead>
+    <tbody>{{range .Providers}}<tr><td style="font-weight:600;color:var(--ink)">{{.ProviderName}} <span style="color:var(--muted);font-weight:400">{{.Model}}</span></td><td class="num">{{.AccuracyRate}}%</td><td class="num"><span class="chip {{scoreClass .SentimentScore}}">{{.SentimentScore}}</span></td><td class="num">{{if or .Answered .Failed}}{{.Answered}}{{if .Failed}} ({{.Failed}} failed){{end}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
+  </table>
+  {{if .Unavailable}}<p class="note">Not included: {{.Unavailable}}. Scores cover the assistants that answered.</p>{{end}}
+  {{if .Queries}}
+  <h3>Query results{{if gt .TotalQueries (len .Queries)}} (first {{len .Queries}} of {{.TotalQueries}}){{end}}</h3>
+  <table><thead><tr><th>Query</th><th>Answers</th></tr></thead>
+    <tbody>{{range .Queries}}<tr><td style="color:var(--ink);width:45%">{{.Query.Query}}</td><td>{{range .ProviderResults}}<span class="chip {{if .Recommended}}g{{else if .Mentioned}}a{{else}}n{{end}}" style="margin:1px 3px 1px 0">{{.ProviderName}} {{.Score}}{{if .Recommended}} · recommends{{else if .Mentioned}} · mentions{{end}}</span>{{end}}</td></tr>{{end}}</tbody>
+  </table>
+  {{end}}
+</section>
+{{end}}
+
+{{if .RecCount}}
+<section class="sheet" id="recommendations">
+  <div class="section-head"><div><div class="eyebrow">What to do</div><h2>Recommendations</h2><div class="lede">The most important of {{.RecCount}} actions from every analysis.</div></div></div>
+  <p class="note" style="margin-top:0">These recommendations aim at visibility in AI assistants and AI search. They don't weigh your wider business constraints and priorities, so consider them alongside your overall strategy.</p>
+  {{if .RecGroups}}<h3>Across YouTube, Reddit and search</h3>{{end}}
+  {{range .RecGroups}}
+  <div class="group-head"><span class="chip {{.Priority}}">{{.Label}}</span><span style="color:var(--faint);font-weight:600;font-size:8pt">{{len .Items}}</span></div>
+  <div class="grid g2">
+    {{range .Items}}{{template "rec" .}}{{end}}
+  </div>
+  {{end}}
+  {{if .AnswerRecs}}
+  <h3>Fixes for your answers</h3>
+  <div class="grid g2">{{range .AnswerRecs}}{{template "rec" .}}{{end}}</div>
+  {{if .MoreAnswers}}<p class="note">{{.MoreAnswers}} more answer fixes are listed with each question in this report and in the app's To-Do list.</p>{{end}}
+  {{end}}
+</section>
+{{end}}
+
+{{with .Opt}}{{if .Appendix}}
+<section class="sheet" id="appendix">
+  <div class="section-head"><div><div class="eyebrow">Appendix</div><h2>Other Optimized Questions</h2><div class="lede">The remaining {{len .Appendix}} questions, from weakest to strongest.</div></div></div>
+  {{range .Appendix}}{{template "qcard" .}}{{end}}
+</section>
+{{end}}{{end}}
+
+<section class="sheet" id="research">
+  <div class="section-head"><div><div class="eyebrow">Method</div><h2>Supporting Research</h2><div class="lede">The findings behind the scores in this report.</div></div></div>
+  <div class="prose">{{range .Research}}<p>{{.}}</p>{{end}}</div>
+  <h3>Bibliography</h3>
+  <table><tbody>{{range .Bibliography}}<tr><td style="width:34px;color:var(--faint);font-weight:700">{{.Ref}}</td><td><div style="color:var(--ink);font-weight:600">{{.Title}}</div><div style="color:var(--muted)">{{.Venue}} · <a href="{{.URL}}">{{.URL}}</a></div></td></tr>{{end}}</tbody></table>
+</section>
+
+</body>
+</html>
+
+{{define "card"}}<div class="card score-card {{if .Available}}{{scoreClass .Score}}{{else}}missing{{end}}">
+  {{if .Available}}<div class="num t-{{scoreClass .Score}}">{{.Score}}<span class="den"> / 100</span></div>{{else}}<div class="num">Not run yet</div>{{end}}
+  <div class="lbl">{{.Label}}</div>{{if .Note}}<div class="note">{{.Note}}</div>{{end}}
+  {{if .Available}}<div class="meter"><i class="fill-{{scoreClass .Score}}" style="width: {{pct .Score}}%"></i></div>{{end}}
+</div>{{end}}
+
+{{define "rec"}}<div class="rec {{.Priority}}"><span class="chip {{.Priority}}">{{title .Priority}}</span> <span class="chip src">{{.Source}}</span><div class="what clamp4">{{.Action}}</div>{{if .Impact}}<div class="why clamp2">Impact: {{.Impact}}</div>{{end}}</div>{{end}}
+
+{{define "bar"}}<div class="bar"><div class="label">{{.Label}}{{if .Detail}}<small>{{.Detail}}</small>{{end}}</div><div class="track"><i class="fill-b" style="width: {{pct .Value}}%"></i></div><div class="val">{{.Text}}</div></div>{{end}}
+
+{{define "scorebar"}}<div class="bar"><div class="label">{{.Label}}{{if .Detail}}<small>{{.Detail}}</small>{{end}}</div><div class="track"><i class="fill-{{scoreClass .Value}}" style="width: {{pct .Value}}%"></i></div><div class="val t-{{scoreClass .Value}}">{{.Text}}</div></div>{{end}}
+
+{{define "qcard"}}<div class="qcard" id="{{.Anchor}}">
+  <div class="q"><h4>{{.Question}}</h4><div class="sc t-{{scoreClass .Overall}}">{{.Overall}}<small> / 100</small></div></div>
+  <div class="dims">{{range .Dims}}<div class="d"><b class="t-{{scoreClass .Score}}">{{.Score}}</b>{{.Label}}<div class="track" style="height:5px;margin-top:3px"><i class="fill-{{scoreClass .Score}}" style="width: {{pct .Score}}%"></i></div></div>{{end}}</div>
+  {{if .Competitors}}<div class="sub">Competing answers</div>{{range .Competitors}}<div class="comp"><span class="chip {{scoreClass .Score}}">{{.Score}}</span><span class="dom">{{.Domain}}</span><span class="str clamp1">{{.Strengths}}</span></div>{{end}}{{end}}
+  {{if .Recs}}<div class="sub">What to change</div>{{range .Recs}}<div class="comp"><span class="chip {{.Priority}}">{{title .Priority}}</span><span class="clamp2" style="color:var(--ink)">{{.Action}}</span></div>{{end}}{{end}}
+</div>{{end}}

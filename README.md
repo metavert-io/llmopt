@@ -216,6 +216,7 @@ cd ../frontend && npx tsc --noEmit
 | `LLMOPT_JWT_ACCESS_SECRET` | SaaS only | HMAC secret for JWT signing |
 | `LLMOPT_LOCAL_USER_ID`, `LLMOPT_LOCAL_TENANT_ID` | Local account mode | Act as this account of a hosted database without signing in (see above) |
 | `LLMOPT_LISTEN_HOST` | No | Address to listen on (default: all interfaces; `127.0.0.1` and loopback only in local account mode) |
+| `LLMOPT_CHROME_PATH` | No | Chrome/Chromium used to print the PDF report (default: found on `PATH`). Without one, the report falls back to a plain PDF |
 | `LLMOPT_LOCAL_ORIGINS` | Local account mode | Comma-separated `scheme://host[:port]` addresses the local copy is opened at besides `127.0.0.1`/`localhost` |
 | `LLMOPT_IDLE_SHUTDOWN`, `LLMOPT_IDLE_SHUTDOWN_VISITOR` | No | Stop the machine after this long without signed-in work (and anonymous visits); see deploy.md |
 | `LLMOPT_LASTSAAS_PROXY`, `LLMOPT_LASTSAAS_UPSTREAM` | SaaS deploy | Listen address for, and LastSaaS URL behind, the proxy that lets idle shutdown see LastSaaS traffic |

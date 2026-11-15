@@ -53,31 +53,20 @@ func TestScoreToRGB_Zero(t *testing.T) {
 
 // ── pdfCleanText ─────────────────────────────────────────────────────────────
 
-func TestPdfCleanText_Bullet(t *testing.T) {
-	result := pdfCleanText("• item one")
-	if result != "- item one" {
-		t.Errorf("expected '- item one', got %q", result)
+// Typography now passes through pdfCleanText and is encoded for the PDF's
+// Windows-1252 fonts by pdfText at the point of drawing (previously it was
+// swapped for ASCII, and anything missed printed as "â€”"-style garbage).
+func TestPdfText_Typography(t *testing.T) {
+	cases := map[string]string{
+		"• item one":       "\x95 item one",
+		"2020\u20132025":   "2020\x962025",
+		"hello\u2014world": "hello\x97world",
+		"\u2018smart\u2019 quotes \u201chere\u201d": "\x91smart\x92 quotes \x93here\x94",
 	}
-}
-
-func TestPdfCleanText_EnDash(t *testing.T) {
-	result := pdfCleanText("2020\u20132025")
-	if result != "2020-2025" {
-		t.Errorf("expected '2020-2025', got %q", result)
-	}
-}
-
-func TestPdfCleanText_EmDash(t *testing.T) {
-	result := pdfCleanText("hello\u2014world")
-	if result != "hello--world" {
-		t.Errorf("expected 'hello--world', got %q", result)
-	}
-}
-
-func TestPdfCleanText_SmartQuotes(t *testing.T) {
-	result := pdfCleanText("\u2018smart\u2019 quotes \u201chere\u201d")
-	if result != "'smart' quotes \"here\"" {
-		t.Errorf("expected smart quotes replaced, got %q", result)
+	for in, want := range cases {
+		if got := pdfText(pdfCleanText(in)); got != want {
+			t.Errorf("pdfText(%q) = %q, want %q", in, got, want)
+		}
 	}
 }
 
@@ -102,12 +91,12 @@ func TestFingerprintEqual_BothNil(t *testing.T) {
 func TestFingerprintEqual_SameTimes(t *testing.T) {
 	now := time.Now().Truncate(time.Second)
 	a := ReportFingerprint{
-		AnalysisExists:   true,
+		AnalysisExists:    true,
 		OptimizationCount: 3,
 		AnalysisCreatedAt: &now,
 	}
 	b := ReportFingerprint{
-		AnalysisExists:   true,
+		AnalysisExists:    true,
 		OptimizationCount: 3,
 		AnalysisCreatedAt: &now,
 	}
@@ -317,7 +306,7 @@ func TestBuildReportPDF_WithOptimizations(t *testing.T) {
 				},
 				StructuralOptimization: DimensionScore{Score: 60},
 				SourceAuthority:        DimensionScore{Score: 75},
-				KnowledgePersistence:  DimensionScore{Score: 55},
+				KnowledgePersistence:   DimensionScore{Score: 55},
 				Competitors: []Competitor{
 					{Domain: "competitor.com", ScoreEstimate: 80, Strengths: "Strong SEO presence"},
 				},
@@ -428,8 +417,8 @@ func TestBuildReportPDF_WithSearchAnalysis(t *testing.T) {
 
 func TestBuildReportPDF_WithLLMTest(t *testing.T) {
 	llmTest := &LLMTest{
-		Domain:      "example.com",
-		BrandName:   "Test Brand",
+		Domain:       "example.com",
+		BrandName:    "Test Brand",
 		OverallScore: 70,
 		ProviderSummaries: []LLMTestSummary{
 			{
@@ -528,20 +517,20 @@ func TestBuildReportPDF_FullData(t *testing.T) {
 		GeneratedAt: time.Now(),
 	}
 	analysis := &Analysis{
-		Domain: "full.com",
-		Model:  "claude-sonnet-4-6",
-		Result: AnalysisResult{SiteSummary: "A leading tech company."},
+		Domain:    "full.com",
+		Model:     "claude-sonnet-4-6",
+		Result:    AnalysisResult{SiteSummary: "A leading tech company."},
 		CreatedAt: time.Now(),
 	}
 	opts := []Optimization{{
 		Question: "How visible is Full Brand to AI?",
 		Domain:   "full.com",
 		Result: OptimizationResult{
-			OverallScore:          80,
-			ContentAuthority:      DimensionScore{Score: 85},
+			OverallScore:           80,
+			ContentAuthority:       DimensionScore{Score: 85},
 			StructuralOptimization: DimensionScore{Score: 75},
-			SourceAuthority:       DimensionScore{Score: 80},
-			KnowledgePersistence:  DimensionScore{Score: 80},
+			SourceAuthority:        DimensionScore{Score: 80},
+			KnowledgePersistence:   DimensionScore{Score: 80},
 		},
 		CreatedAt: time.Now(),
 	}}
@@ -555,13 +544,13 @@ func TestBuildReportPDF_FullData(t *testing.T) {
 		GeneratedAt: time.Now(),
 	}
 	redditAnalysis := &RedditAnalysis{
-		Domain: "full.com",
-		Result: &RedditAuthorityResult{OverallScore: 70, ExecutiveSummary: "Positive Reddit presence."},
+		Domain:      "full.com",
+		Result:      &RedditAuthorityResult{OverallScore: 70, ExecutiveSummary: "Positive Reddit presence."},
 		GeneratedAt: time.Now(),
 	}
 	searchAnalysis := &SearchAnalysis{
-		Domain: "full.com",
-		Result: &SearchVisibilityResult{OverallScore: 72, ExecutiveSummary: "Good search presence."},
+		Domain:      "full.com",
+		Result:      &SearchVisibilityResult{OverallScore: 72, ExecutiveSummary: "Good search presence."},
 		GeneratedAt: time.Now(),
 	}
 	llmTest := &LLMTest{
