@@ -2,20 +2,9 @@
 
 ## 2026-11-15
 
-- **LLM Test**: a call that failed (for example a provider's quota error) now shows "No answer" without a score in the query results, instead of reading like an answer that didn't mention the brand.
-- **Update advice (second pass)**: the reviser is now told how retired advice actually appears in older results and how to fix each case:
-  - summary boxes as AI extraction targets;
-  - FAQ and Schema.org markup for AI citation;
-  - quotations or statistics added for visibility;
-  - page speed as a citation lever;
-  - stated uplift percentages;
-  - evidence that counts their absence against a site.
+A second review of the 2026 research, and what it changes in the scoring, the LLM Test and the advice the app gives. Released to llmopt.metavert.io as release 226.
 
-  The first pass left most of it in place. Results updated with the older instructions are updated again (each update is versioned and backed up). Each change is listed even when the reviser doesn't describe it, by comparing the text before and after. The progress message counts optimizations as they finish.
-- **Update advice**: answer optimizations are revised one per call, and to-dos twenty per call, four calls at a time (optimizations were four per call, three at a time, and to-dos one call after another); four optimizations per call could run past the provider's per-call time limit and leave those optimizations unchanged.
-- **LLM Test: time limit**: a slow provider can no longer sink a whole test. Answers now have their own deadline, short of the test's time limit, so there's always time to grade. Calls still unfinished at the deadline count as unanswered ("ran out of time", with a note saying how many per provider), and the test is scored and saved on the answers that came back. Before, a test that ran out of time ended with nothing saved. Providers answer three queries at a time (was two), and large tests (several runs plus web search) may take up to an hour (was 45 minutes).
-- **Report cache**: a cached report is now regenerated after a new LLM Test, after its advice is updated to current research, or when open to-dos are archived or completed (it used to look only at the analyses, the summary and the newest to-do).
-- **Research (November 2026 addendum)**: a second 2026 review adds 30 sources to the research the app cites, in the report's Supporting Research, the methodology page, the in-app methodology and `research.md` (new section 10).
+- **Research (November 2026 addendum)**: 30 more sources in the report's Supporting Research, the methodology page, the in-app methodology and `research.md` (new section 10).
   - **Added:**
     - **What changes citation:** comparing pages of the same website, FAQ blocks, summary boxes and schema showed no effect, while a title and key paragraph that match the question did. The 2023 quotation and statistics levers moved citation on none of ten current engine families. Pages with figures, definitions, comparisons and steps shaped answers more.
     - **What models remember:** assistants name brands they already know, and well-known brands are favored, so brands are best compared with peers of similar size. Owned pages still matter: a brand is far more likely to be named when one of its own pages is retrieved.
@@ -29,16 +18,35 @@
     - **Reddit:** per-engine shares are dated, disputed figures, and assistants read Reddit far more than they cite it.
     - **YouTube:** it leads mainly through Google's AI surfaces.
     - **Schema:** it shows no lift "on live engines".
-  - **Methodology page:** the framework descriptions match the new criteria. FAQ blocks and summary boxes earn no credit by themselves, a brand's own self-ranked lists don't count as coverage, and page scores measure quality and fit for the question.
-  - **README:** describes the current score weights, the LLM Test's repeated runs and web-search pass, and the research that replaced the "+41% quotations" claim.
-- **Update advice to current research**: saved results whose advice predates the current research can be updated without re-running them. A banner under a domain's scorecard says what can be updated; "Update advice" has the account's AI provider rewrite only the advice the research no longer supports, such as FAQ blocks or schema as citation levers, llms.txt, unblocking Google-Extended for AI Overviews, or outdated figures. It covers answer optimizations (improvements, evidence and recommendations), the search, YouTube and Reddit analyses (summaries, evidence and recommendations) and open to-dos (rewritten, or archived when they only pursued unsupported advice). Scores and site findings stay as measured. Each document is copied to a backup collection before it changes, and each updated result shows what changed. The report notes when its advice was updated. `GET`/`POST /api/domains/{domain}/guidance`.
-- **Answer optimization (2026 research follow-up)**: Structural Optimization now scores whether a page's title and key paragraph match the question as buyers ask it, the page property that held up when comparing pages within one site, and no longer credits FAQ blocks, summary boxes or page speed by themselves (they only appeared to help across different websites). Content Authority names the evidence assistants actually use in answers: figures, definitions, comparisons, steps and explicit prices. Pricing and plan details are treated as the claims AI gets wrong most often. A brand's own "best X" lists don't count as third-party coverage. Recommendations follow suit. Page scores are described as quality and fit for the question, not a predicted citation rate. These criteria apply to optimizations run from now on.
+  - **Methodology page:** the framework descriptions match the new criteria below.
+  - **README:** describes the current score weights, the LLM Test's repeated runs, web-search pass and miss diagnosis, "Update advice", the redesigned report, the Reddit web-search fallback and the files behind them, and the research that replaced the "+41% quotations" claim.
+- **Answer optimization**: Structural Optimization now scores whether a page's title and key paragraph match the question as buyers ask it, and no longer credits FAQ blocks, summary boxes or page speed by themselves. Content Authority names the evidence assistants actually use in answers: figures, definitions, comparisons, steps and explicit prices. Pricing and plan details are treated as the claims AI gets wrong most often. A brand's own "best X" lists don't count as third-party coverage. Recommendations follow suit. Page scores are described as quality and fit for the question, not a predicted citation rate. These criteria apply to optimizations run from now on; "Update advice" brings older ones in line.
 - **LLM Test**:
   - **Web-search diagnosis:** each answer given with web search records where the brand fell out: not found (content, indexing or crawler access), found among the sources but not named (positioning and reputation), named but not recommended (competitive), or recommended. The test shows these counts, and the mention rate for answers that cited the brand's own site against those that didn't. It also records whether the model actually searched (with search available, models sometimes answer from memory).
   - **Grading:** sentiment is no longer part of an answer's score; it is rated separately, since tone varies most between runs. Accuracy checks pricing and plan claims first. Each test records the models that graded it.
   - **Labels:** results say they come from the providers' APIs (the consumer apps can answer differently), and that with 5 or fewer runs a difference on one question is indicative.
+  - **Time limit:** a slow provider can no longer sink a whole test. Answers have their own deadline, short of the test's time limit, so there's always time to grade. Calls still unfinished at the deadline count as unanswered ("ran out of time", with a note saying how many per provider), and the test is scored and saved on the answers that came back. Before, a test that ran out of time ended with nothing saved. Providers answer three queries at a time (was two), and large tests (several runs plus web search) may take up to an hour (was 45 minutes).
+  - **Failed calls** (for example a provider's quota error) show "No answer" without a score, instead of reading like an answer that didn't mention the brand.
 - **Peer comparison**: the scorecard and the competitor test note that assistants mostly name brands they already know (household names in 73% of category answers, niche brands 11% in one 2026 study), so compare with competitors of similar size.
 - **Crawler guidance**: Google-Extended controls Gemini training and grounding and, per Google, doesn't affect Google Search or AI Overviews, so recommendations no longer imply that unblocking it helps AI Overviews. robots.txt is described as stating intent, not enforcing it, and Google's planned 2027 training opt-out is mentioned.
+- **Update advice to current research**: saved results whose advice predates the current research can be updated without re-running them (`GET`/`POST /api/domains/{domain}/guidance`).
+  - **What it does:** a banner under a domain's scorecard says what can be updated. "Update advice" has the account's AI provider rewrite only the advice the research no longer supports, such as FAQ blocks or schema as citation levers, llms.txt, unblocking Google-Extended for AI Overviews, or outdated figures. Scores and site findings stay as measured.
+  - **Coverage:**
+    - answer optimizations: improvements, evidence and recommendations;
+    - the search, YouTube and Reddit analyses: summaries, evidence and recommendations;
+    - open to-dos: rewritten, or archived when they only pursued unsupported advice.
+  - **How retired advice shows up:** the reviser is told how it appears in older results and how to fix each case:
+    - summary boxes as AI extraction targets;
+    - FAQ and Schema.org markup for AI citation;
+    - quotations or statistics added for visibility;
+    - page speed as a citation lever;
+    - stated uplift percentages;
+    - evidence that counts their absence against a site.
+
+    A first version named only the ideas and left most of the advice in place. Updates are versioned, so results updated with older instructions are updated again.
+  - **Safety and notes:** each document is copied to a backup collection before it changes. Each updated result lists what changed, taken from the reviser or, when it doesn't say, from comparing the text before and after. The report notes when its advice was updated.
+  - **Speed:** optimizations are revised one per call and to-dos twenty per call, four calls at a time; larger batches ran past the provider's per-call time limit.
+- **Report cache**: a cached report is regenerated after a new LLM Test, after its advice is updated, or when open to-dos are archived or completed (it used to look only at the analyses, the summary and the newest to-do).
 - **Scoring rubric 3**: new analyses and tests record rubric version 3, and executive summaries written before it are marked out of date.
 
 ## 2026-11-14
