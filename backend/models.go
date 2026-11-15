@@ -826,6 +826,17 @@ type LLMTestProviderResult struct {
 	Sentiment    string `json:"sentiment" bson:"sentiment"` // positive, neutral, negative, absent
 	Accuracy     string `json:"accuracy" bson:"accuracy"`   // accurate, partially_accurate, inaccurate, not_applicable
 	Score        int    `json:"score" bson:"score"`
+	// Run numbers repeated asks of the same query (1-based; 0 in tests from
+	// before repeated runs). Search marks an answer given with web search.
+	Run    int  `json:"run,omitempty" bson:"run,omitempty"`
+	Search bool `json:"search,omitempty" bson:"search,omitempty"`
+	// Citations are the pages a web-search answer cited; CitesOwnSite is true
+	// when one of them is on the tested domain.
+	Citations    []string `json:"citations,omitempty" bson:"citations,omitempty"`
+	CitesOwnSite bool     `json:"cites_own_site,omitempty" bson:"citesOwnSite,omitempty"`
+	// Unscored marks an answer the evaluator returned no verdict for; it
+	// counts in no rate.
+	Unscored bool `json:"unscored,omitempty" bson:"unscored,omitempty"`
 }
 
 type LLMTestQueryResult struct {
@@ -842,9 +853,46 @@ type LLMTestSummary struct {
 	RecommendRate  int    `json:"recommend_rate" bson:"recommendRate"`
 	AccuracyRate   int    `json:"accuracy_rate" bson:"accuracyRate"`
 	SentimentScore int    `json:"sentiment_score" bson:"sentimentScore"`
-	// Answered and Failed count this provider's queries; rates are over Answered.
+	// Answered and Failed count this provider's answers (over all runs); rates are over Answered.
 	Answered int `json:"answered,omitempty" bson:"answered,omitempty"`
 	Failed   int `json:"failed,omitempty" bson:"failed,omitempty"`
+	// Spread is how much the rates moved between runs (with 2+ runs).
+	Spread *LLMTestSpread `json:"spread,omitempty" bson:"spread,omitempty"`
+	// Search is the same provider answering with web search, when tested.
+	Search *LLMTestSearchSummary `json:"search,omitempty" bson:"search,omitempty"`
+}
+
+// LLMTestSpread is the range of a provider's rates over the runs of a test:
+// AI answers vary from run to run, so a single run can mislead.
+type LLMTestSpread struct {
+	MentionLow    int `json:"mention_low" bson:"mentionLow"`
+	MentionHigh   int `json:"mention_high" bson:"mentionHigh"`
+	RecommendLow  int `json:"recommend_low" bson:"recommendLow"`
+	RecommendHigh int `json:"recommend_high" bson:"recommendHigh"`
+	ScoreLow      int `json:"score_low" bson:"scoreLow"`
+	ScoreHigh     int `json:"score_high" bson:"scoreHigh"`
+	// Consistency is the share of queries whose mention (yes or no) was the
+	// same in every run.
+	Consistency int `json:"consistency" bson:"consistency"`
+}
+
+// LLMTestSearchSummary scores a provider's answers given with web search.
+type LLMTestSearchSummary struct {
+	OverallScore  int `json:"overall_score" bson:"overallScore"`
+	MentionRate   int `json:"mention_rate" bson:"mentionRate"`
+	RecommendRate int `json:"recommend_rate" bson:"recommendRate"`
+	// OwnSiteRate is the share of answers citing a page on the tested domain.
+	OwnSiteRate int `json:"own_site_rate" bson:"ownSiteRate"`
+	Answered    int `json:"answered" bson:"answered"`
+	Failed      int `json:"failed,omitempty" bson:"failed,omitempty"`
+}
+
+// LLMTestCitedDomain is a site the web-search answers cited, and how many
+// answers cited it.
+type LLMTestCitedDomain struct {
+	Domain  string `json:"domain" bson:"domain"`
+	Answers int    `json:"answers" bson:"answers"`
+	Own     bool   `json:"own,omitempty" bson:"own,omitempty"`
 }
 
 // LLMTestUnavailable records a selected provider that couldn't answer any query,
@@ -871,6 +919,18 @@ type LLMTest struct {
 	BrandContextUsed     bool                 `json:"brand_context_used" bson:"brandContextUsed"`
 	CompetitorOf         string               `json:"competitor_of,omitempty" bson:"competitorOf,omitempty"`
 	GeneratedAt          time.Time            `json:"generated_at" bson:"generatedAt"`
+	// Runs is how many times each query was asked (0 or 1: once).
+	Runs int `json:"runs,omitempty" bson:"runs,omitempty"`
+	// ScoreRange is the overall score's lowest and highest run (2+ runs).
+	ScoreRange []int `json:"score_range,omitempty" bson:"scoreRange,omitempty"`
+	// WebSearch: each query was also answered with web search. SearchScore is
+	// the overall score of those answers ("searched" visibility; OverallScore
+	// is what the models remember), TopCitedDomains the sites they cited.
+	WebSearch       bool                 `json:"web_search,omitempty" bson:"webSearch,omitempty"`
+	SearchScore     *int                 `json:"search_score,omitempty" bson:"searchScore,omitempty"`
+	TopCitedDomains []LLMTestCitedDomain `json:"top_cited_domains,omitempty" bson:"topCitedDomains,omitempty"`
+	// RubricVersion is the scoring rubric (scoring.go); 0 = before version 2.
+	RubricVersion int `json:"rubric_version,omitempty" bson:"rubricVersion,omitempty"`
 }
 
 // TestQuerySet is the LLM Test query list saved for a domain, so a tenant's

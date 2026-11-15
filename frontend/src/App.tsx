@@ -660,6 +660,11 @@ interface TestProviderResult {
   sentiment: string  // positive, neutral, negative, absent
   accuracy: string   // accurate, partially_accurate, inaccurate, not_applicable
   score: number
+  run?: number           // which repeat of the query (1-based)
+  search?: boolean       // answered with web search
+  citations?: string[]   // pages a web-search answer cited
+  cites_own_site?: boolean
+  unscored?: boolean     // the evaluator returned no verdict for it
 }
 
 interface TestQueryResult {
@@ -676,8 +681,10 @@ interface TestProviderSummary {
   recommend_rate: number
   accuracy_rate: number
   sentiment_score: number
-  answered?: number  // queries this provider answered (rates are over these)
-  failed?: number    // queries it couldn't answer
+  answered?: number  // answers this provider gave (rates are over these)
+  failed?: number    // answers it couldn't give
+  spread?: { mention_low: number; mention_high: number; recommend_low: number; recommend_high: number; score_low: number; score_high: number; consistency: number }
+  search?: { overall_score: number; mention_rate: number; recommend_rate: number; own_site_rate: number; answered: number; failed?: number }
 }
 
 interface TestUnavailableProvider {
@@ -700,6 +707,11 @@ interface LLMTestResult {
   brand_context_used: boolean
   competitor_of?: string
   generated_at: string
+  runs?: number             // times each query was asked
+  score_range?: number[]    // [lowest, highest] run
+  web_search?: boolean
+  search_score?: number     // overall score with web search ("searched")
+  top_cited_domains?: { domain: string; answers: number; own?: boolean }[]
 }
 
 type AppState = 'idle' | 'analyzing' | 'done' | 'error'
@@ -725,6 +737,34 @@ function safePathname(urlStr: string): string {
     return parsed.pathname === '/' ? urlStr : parsed.pathname
   } catch {
     return urlStr
+  }
+}
+
+// groupTestAnswers puts one query's answers together per assistant: its
+// remembered runs in one group, its web-search answer in another.
+function groupTestAnswers(results: TestProviderResult[]): { key: string; search: boolean; items: TestProviderResult[] }[] {
+  const groups: { key: string; search: boolean; items: TestProviderResult[] }[] = []
+  const at: Record<string, number> = {}
+  for (const pr of results) {
+    const key = `${pr.provider_id}${pr.search ? '-search' : ''}`
+    if (at[key] === undefined) {
+      at[key] = groups.length
+      groups.push({ key, search: !!pr.search, items: [] })
+    }
+    groups[at[key]].items.push(pr)
+  }
+  return groups
+}
+
+// citationLabel shortens a cited URL to its site and path.
+function citationLabel(u: string): string {
+  try {
+    const url = new URL(u)
+    const path = url.pathname === '/' ? '' : url.pathname
+    const label = url.hostname.replace(/^www\./, '') + path
+    return label.length > 60 ? label.slice(0, 57) + '…' : label
+  } catch {
+    return u
   }
 }
 
@@ -1018,6 +1058,19 @@ export default function App() {
   const [testRecheckingProvider, setTestRecheckingProvider] = useState<string | null>(null)
   const [testProviderNotes, setTestProviderNotes] = useState<Record<string, string>>({})
   const [testModelSelections, setTestModelSelections] = useState<Record<string, string>>({})
+  // Runs per query and the web-search pass; remembered in this browser.
+  const [testRuns, setTestRuns] = useState<number>(() => {
+    try { const v = Number(localStorage.getItem('llmopt.testRuns')); return v >= 1 && v <= 5 ? v : 3 } catch { return 3 }
+  })
+  const [testWebSearch, setTestWebSearch] = useState<boolean>(() => {
+    try { return localStorage.getItem('llmopt.testWebSearch') === '1' } catch { return false }
+  })
+  useEffect(() => {
+    try {
+      localStorage.setItem('llmopt.testRuns', String(testRuns))
+      localStorage.setItem('llmopt.testWebSearch', testWebSearch ? '1' : '0')
+    } catch { /* storage unavailable */ }
+  }, [testRuns, testWebSearch])
   const [competitorTests, setCompetitorTests] = useState<LLMTestResult[]>([])
   const [showCompetitorOverlay, setShowCompetitorOverlay] = useState(false)
   const [competitorDomain, setCompetitorDomain] = useState('')
@@ -2560,6 +2613,8 @@ export default function App() {
           providers: testSelectedProviders,
           queries: testQueries,
           models: Object.keys(testModelSelections).length > 0 ? testModelSelections : undefined,
+          runs: testRuns,
+          web_search: testWebSearch,
           force,
         }),
         signal: controller.signal,
@@ -2622,7 +2677,7 @@ export default function App() {
       setTestAnalyzing(false)
       testAbortRef.current = null
     }
-  }, [selectedDomain, testSelectedProviders, testQueries, testModelSelections, saasEnabled, user, apiKeyStatus])
+  }, [selectedDomain, testSelectedProviders, testQueries, testModelSelections, testRuns, testWebSearch, saasEnabled, user, apiKeyStatus])
 
   // Re-check a provider key from the test page (e.g. after a provider retired the
   // model the last check used). An active key becomes selectable right away.
@@ -2679,6 +2734,7 @@ export default function App() {
           queries: testResults.queries,
           models: Object.keys(testModelSelections).length > 0 ? testModelSelections : undefined,
           competitor_of: selectedDomain,
+          runs: testResults.runs || 1, // same runs as the test it's compared with
           force: false,
         }),
         signal: controller.signal,
@@ -10399,7 +10455,16 @@ curl -X PATCH \\
                         <h2 className="text-xl font-bold text-white">LLM Brand Test — {r.brand_name}</h2>
                         {r.run_number > 0 && <span className="text-xs text-dark-500 bg-dark-800 px-2 py-0.5 rounded-full">Run #{r.run_number}</span>}
                       </div>
-                      <p className="text-dark-400 text-sm">{r.provider_summaries.length} provider{r.provider_summaries.length !== 1 ? 's' : ''} tested with {r.queries.length} queries &middot; {fmtDate(r.generated_at)}</p>
+                      <p className="text-dark-400 text-sm">{r.provider_summaries.length} provider{r.provider_summaries.length !== 1 ? 's' : ''} tested with {r.queries.length} queries{(r.runs ?? 1) > 1 ? ` × ${r.runs} runs` : ''}{r.web_search ? ', plus web search' : ''} &middot; {fmtDate(r.generated_at)}</p>
+                      {(r.score_range?.length === 2 || r.search_score != null) && (
+                        <p className="text-dark-400 text-xs mt-1">
+                          {r.score_range?.length === 2 && <span>Overall score {r.score_range[0] === r.score_range[1] ? `${r.score_range[0]} in every run` : `ranged ${r.score_range[0]}–${r.score_range[1]} between runs`}.</span>}
+                          {r.search_score != null && <span>{r.score_range?.length === 2 ? ' ' : ''}With web search: <span className={`font-semibold ${scoreColor(r.search_score)}`}>{r.search_score}</span> <span className="text-dark-500">(what assistants find; {r.overall_score} is what they remember)</span></span>}
+                        </p>
+                      )}
+                      {(r.runs ?? 0) <= 1 && (
+                        <p className="text-dark-500 text-xs mt-1">Asked once per query. AI answers vary from run to run; run the test with 3 or more runs per query for steadier numbers.</p>
+                      )}
                       {r.unavailable_providers && r.unavailable_providers.length > 0 && (
                         <p className="text-amber-400/80 text-xs mt-1">
                           Not included: {r.unavailable_providers.map(u => `${u.provider_name} (${u.reason})`).join('; ')}. Scores cover the providers that answered.
@@ -10534,14 +10599,27 @@ curl -X PATCH \\
                             </div>
                           </div>
                           <div className="space-y-2 text-xs">
-                            <div className="flex justify-between"><span className="text-dark-400">Mention Rate</span><span className="text-white font-medium">{ps.mention_rate}%</span></div>
-                            <div className="flex justify-between"><span className="text-dark-400">Recommend Rate</span><span className="text-white font-medium">{ps.recommend_rate}%</span></div>
+                            <div className="flex justify-between"><span className="text-dark-400">Mention Rate</span><span className="text-white font-medium">{ps.mention_rate}%{ps.spread && ps.spread.mention_low !== ps.spread.mention_high && <span className="text-dark-500 font-normal" title="Lowest and highest run"> ({ps.spread.mention_low}–{ps.spread.mention_high}%)</span>}</span></div>
+                            <div className="flex justify-between"><span className="text-dark-400">Recommend Rate</span><span className="text-white font-medium">{ps.recommend_rate}%{ps.spread && ps.spread.recommend_low !== ps.spread.recommend_high && <span className="text-dark-500 font-normal" title="Lowest and highest run"> ({ps.spread.recommend_low}–{ps.spread.recommend_high}%)</span>}</span></div>
+                            {ps.spread && (
+                              <div className="flex justify-between"><span className="text-dark-400" title="Share of queries where the brand was mentioned (or not) in every run">Consistency</span><span className="text-white font-medium">{ps.spread.consistency}%</span></div>
+                            )}
                             <div className="flex justify-between"><span className="text-dark-400">Accuracy</span><span className="text-white font-medium">{ps.accuracy_rate}%</span></div>
                             <div className="flex justify-between"><span className="text-dark-400">Sentiment</span><span className="text-white font-medium">{ps.sentiment_score}/100</span></div>
                             {!!ps.failed && ps.failed > 0 && (
-                              <div className="flex justify-between"><span className="text-dark-400">Answered</span><span className="text-amber-400/80 font-medium">{ps.answered ?? 0} of {(ps.answered ?? 0) + ps.failed} queries</span></div>
+                              <div className="flex justify-between"><span className="text-dark-400">Answered</span><span className="text-amber-400/80 font-medium">{ps.answered ?? 0} of {(ps.answered ?? 0) + ps.failed} {(r.runs ?? 1) > 1 ? 'answers' : 'queries'}</span></div>
                             )}
                           </div>
+                          {ps.search && (
+                            <div className="mt-3 pt-3 border-t border-dark-700 space-y-2 text-xs">
+                              <div className="flex justify-between items-center"><span className="text-dark-300 font-medium">With web search</span>{ps.search.answered > 0 ? <span className={`font-bold ${scoreColor(ps.search.overall_score)}`}>{ps.search.overall_score}</span> : <span className="text-amber-400/80">no answers</span>}</div>
+                              {ps.search.answered > 0 && <>
+                                <div className="flex justify-between"><span className="text-dark-400">Mention Rate</span><span className="text-white font-medium">{ps.search.mention_rate}%</span></div>
+                                <div className="flex justify-between"><span className="text-dark-400">Cites your site</span><span className="text-white font-medium">{ps.search.own_site_rate}%</span></div>
+                              </>}
+                              {!!ps.search.failed && <div className="flex justify-between"><span className="text-dark-400">Answered</span><span className="text-amber-400/80 font-medium">{ps.search.answered} of {ps.search.answered + ps.search.failed}</span></div>}
+                            </div>
+                          )}
                           {compScores.length > 0 && (
                             <div className="mt-3 pt-3 border-t border-dark-700 space-y-1.5">
                               {compScores.map(cs => {
@@ -10565,6 +10643,21 @@ curl -X PATCH \\
                     })}
                   </div>
 
+                  {/* Sites cited by the web-search answers */}
+                  {r.top_cited_domains && r.top_cited_domains.length > 0 && (
+                    <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-4">
+                      <h3 className="text-white font-semibold text-sm mb-1">Sites cited in web-search answers</h3>
+                      <p className="text-dark-500 text-xs mb-3">How many answers cited each site. Third-party sites here are where assistants learn about your category.</p>
+                      <div className="flex flex-wrap gap-2">
+                        {r.top_cited_domains.map(d => (
+                          <span key={d.domain} className={`text-xs px-2.5 py-1 rounded-lg border ${d.own ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300' : 'bg-dark-900/50 border-dark-700 text-dark-300'}`}>
+                            {d.domain}{d.own ? ' (your site)' : ''} <span className="text-dark-500">· {d.answers}</span>
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
                   {/* Query results comparison */}
                   <div className="space-y-4">
                     <h3 className="text-white font-semibold text-lg">Query Results</h3>
@@ -10577,42 +10670,76 @@ curl -X PATCH \\
                             <span className="text-white text-sm font-medium">{qr.query.query}</span>
                           </div>
                           <div className="divide-y divide-dark-700/50">
-                            {qr.provider_results.map((pr, pi) => {
-                              const cellKey = `${qi}-${pi}`
+                            {groupTestAnswers(qr.provider_results).map(g => {
+                              const cellKey = `${qi}-${g.key}`
                               const expanded = testExpandedCells.has(cellKey)
+                              const graded = g.items.filter(pr => !pr.unscored && !pr.response.startsWith('Error: '))
+                              const mentioned = graded.filter(pr => pr.mentioned).length
+                              const recommended = graded.filter(pr => pr.recommended).length
+                              const avg = graded.length ? Math.round(graded.reduce((n, pr) => n + pr.score, 0) / graded.length) : 0
+                              const first = g.items[0]
+                              const toggle = () => setTestExpandedCells(prev => {
+                                const next = new Set(prev)
+                                if (next.has(cellKey)) next.delete(cellKey)
+                                else next.add(cellKey)
+                                return next
+                              })
                               return (
-                                <div key={pi} className="px-4 py-3">
-                                  <div className="flex items-center justify-between mb-1">
-                                    <div className="flex items-center gap-3">
-                                      <span className="text-dark-400 text-xs font-medium w-20">{pr.provider_name}</span>
-                                      <div className="flex items-center gap-2 text-xs">
-                                        <span className={pr.mentioned ? 'text-emerald-400' : 'text-dark-600'} title={pr.mentioned ? 'Brand mentioned' : 'Not mentioned'}>
-                                          {pr.mentioned ? '✓ Mentioned' : '✗ Not mentioned'}
-                                        </span>
-                                        {pr.recommended && <span className="text-amber-400" title="Brand recommended">★ Recommended</span>}
-                                        <span className={sentimentColor(pr.sentiment)} title={`Sentiment: ${pr.sentiment}`}>{sentimentIcon(pr.sentiment)} {pr.sentiment}</span>
-                                      </div>
+                                <div key={g.key} className="px-4 py-3">
+                                  <div className="flex items-center justify-between mb-1 gap-3">
+                                    <div className="flex items-center gap-3 flex-wrap min-w-0">
+                                      <span className="text-dark-400 text-xs font-medium w-20 shrink-0">{first.provider_name}</span>
+                                      {g.search && <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 border border-cyan-500/30 text-cyan-300">web search</span>}
+                                      {g.items.length > 1 ? (
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <span className={mentioned > 0 ? 'text-emerald-400' : 'text-dark-600'}>Mentioned in {mentioned} of {graded.length} runs</span>
+                                          {recommended > 0 && <span className="text-amber-400">★ Recommended in {recommended}</span>}
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center gap-2 text-xs">
+                                          <span className={first.mentioned ? 'text-emerald-400' : 'text-dark-600'} title={first.mentioned ? 'Brand mentioned' : 'Not mentioned'}>
+                                            {first.mentioned ? '✓ Mentioned' : '✗ Not mentioned'}
+                                          </span>
+                                          {first.recommended && <span className="text-amber-400" title="Brand recommended">★ Recommended</span>}
+                                          <span className={sentimentColor(first.sentiment)} title={`Sentiment: ${first.sentiment}`}>{sentimentIcon(first.sentiment)} {first.sentiment}</span>
+                                          {first.cites_own_site && <span className="text-cyan-300">cites your site</span>}
+                                        </div>
+                                      )}
                                     </div>
-                                    <div className="flex items-center gap-2">
-                                      <span className={`text-sm font-bold ${scoreColor(pr.score)}`}>{pr.score}</span>
-                                      <button
-                                        onClick={() => setTestExpandedCells(prev => {
-                                          const next = new Set(prev)
-                                          if (next.has(cellKey)) next.delete(cellKey)
-                                          else next.add(cellKey)
-                                          return next
-                                        })}
-                                        className="text-dark-500 hover:text-white transition-colors cursor-pointer"
-                                      >
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <span className={`text-sm font-bold ${scoreColor(avg)}`} title={g.items.length > 1 ? 'Average over the runs' : undefined}>{avg}</span>
+                                      <button onClick={toggle} className="text-dark-500 hover:text-white transition-colors cursor-pointer">
                                         <svg className={`w-4 h-4 transition-transform ${expanded ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" /></svg>
                                       </button>
                                     </div>
                                   </div>
                                   {!expanded && (
-                                    <p className="text-dark-400 text-xs line-clamp-2 cursor-pointer" onClick={() => setTestExpandedCells(prev => { const next = new Set(prev); next.add(cellKey); return next })}>{pr.response}</p>
+                                    <p className="text-dark-400 text-xs line-clamp-2 cursor-pointer" onClick={toggle}>{first.response}</p>
                                   )}
                                   {expanded && (
-                                    <div className="mt-2 p-3 bg-dark-900/50 rounded-lg text-dark-300 text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">{pr.response}</div>
+                                    <div className="mt-2 space-y-2">
+                                      {g.items.map((pr, k) => (
+                                        <div key={k} className="p-3 bg-dark-900/50 rounded-lg">
+                                          {g.items.length > 1 && (
+                                            <div className="flex items-center gap-2 text-xs mb-1.5">
+                                              <span className="text-dark-500 font-medium">Run {pr.run || k + 1}</span>
+                                              <span className={pr.mentioned ? 'text-emerald-400' : 'text-dark-600'}>{pr.mentioned ? '✓ Mentioned' : '✗ Not mentioned'}</span>
+                                              {pr.recommended && <span className="text-amber-400">★ Recommended</span>}
+                                              <span className={`font-semibold ${scoreColor(pr.score)}`}>{pr.score}</span>
+                                            </div>
+                                          )}
+                                          <div className="text-dark-300 text-xs whitespace-pre-wrap max-h-96 overflow-y-auto">{pr.response}</div>
+                                          {pr.citations && pr.citations.length > 0 && (
+                                            <div className="mt-2 pt-2 border-t border-dark-700/50 text-xs">
+                                              <span className="text-dark-500">Cited: </span>
+                                              {pr.citations.map((u, ci) => (
+                                                <a key={ci} href={u} target="_blank" rel="noopener noreferrer" className="text-primary-400 hover:text-primary-300 mr-2 break-all">{citationLabel(u)}</a>
+                                              ))}
+                                            </div>
+                                          )}
+                                        </div>
+                                      ))}
+                                    </div>
                                   )}
                                 </div>
                               )
@@ -10801,6 +10928,32 @@ curl -X PATCH \\
                   )}
                 </div>
 
+                {/* Runs and web search */}
+                <div className="bg-dark-800/50 border border-dark-700 rounded-xl p-4 space-y-4">
+                  <div>
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <h3 className="text-white font-semibold text-sm">Runs per query</h3>
+                      <div className="flex gap-1">
+                        {[1, 2, 3, 4, 5].map(n => (
+                          <button
+                            key={n}
+                            onClick={() => setTestRuns(n)}
+                            className={`w-8 h-8 rounded-lg text-sm font-medium transition-colors cursor-pointer ${testRuns === n ? 'bg-primary-500/20 border border-primary-500/40 text-primary-300' : 'bg-dark-900/50 border border-dark-700 text-dark-400 hover:text-white'}`}
+                          >{n}</button>
+                        ))}
+                      </div>
+                    </div>
+                    <p className="text-dark-500 text-xs mt-1">AI answers change from run to run, so a single answer can mislead. Each query is asked {testRuns === 1 ? 'once' : `${testRuns} times`} and the rates cover every run{testRuns > 1 ? ', with the range between runs' : ''}. More runs cost more API calls but give steadier numbers.</p>
+                  </div>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" checked={testWebSearch} onChange={e => setTestWebSearch(e.target.checked)} className="mt-0.5 accent-primary-500 cursor-pointer" />
+                    <span>
+                      <span className="text-white text-sm font-medium">Also answer with web search</span>
+                      <span className="block text-dark-500 text-xs mt-0.5">Each query is asked once more with the assistant's web search on, to compare what assistants find with what they remember, and to see which sites they cite: yours or others'.</span>
+                    </span>
+                  </label>
+                </div>
+
                 {/* Run button */}
                 <div className="flex justify-end">
                   <button
@@ -10812,7 +10965,7 @@ curl -X PATCH \\
                         : 'bg-dark-800 text-dark-500 cursor-not-allowed'
                     }`}
                   >
-                    Run Test ({testSelectedProviders.length} provider{testSelectedProviders.length !== 1 ? 's' : ''}, {testQueries.filter(q => q.query.trim()).length} queries)
+                    Run Test ({testSelectedProviders.length} provider{testSelectedProviders.length !== 1 ? 's' : ''}, {testQueries.filter(q => q.query.trim()).length} queries{testRuns > 1 ? ` × ${testRuns} runs` : ''}{testWebSearch ? ' + web search' : ''})
                   </button>
                 </div>
               </div>

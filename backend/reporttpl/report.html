@@ -387,7 +387,7 @@ body.web .cover { height: auto; min-height: 250mm; }
 {{with .Test}}
 <section class="sheet" id="llm-test">
   <div class="section-head">
-    <div><div class="eyebrow">Live test</div><h2>LLM Brand Test</h2><div class="lede">What today's AI assistants actually say when asked about you and your category.</div></div>
+    <div><div class="eyebrow">Live test</div><h2>LLM Brand Test</h2><div class="lede">What today's AI assistants actually say when asked about you and your category.{{if gt .Runs 1}} Each query was asked {{.Runs}} times{{if .HasRange}}; the overall score ranged {{.ScoreLow}}–{{.ScoreHigh}} between runs{{end}}.{{end}}</div></div>
     <div class="badge-score"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Overall</div></div>
   </div>
   <div class="grid {{if ge (len .Providers) 4}}g4{{else}}g3{{end}}">
@@ -404,10 +404,29 @@ body.web .cover { height: auto; min-height: 250mm; }
     <tbody>{{range .Providers}}<tr><td style="font-weight:600;color:var(--ink)">{{.ProviderName}} <span style="color:var(--muted);font-weight:400">{{.Model}}</span></td><td class="num">{{.AccuracyRate}}%</td><td class="num"><span class="chip {{scoreClass .SentimentScore}}">{{.SentimentScore}}</span></td><td class="num">{{if or .Answered .Failed}}{{.Answered}}{{if .Failed}} ({{.Failed}} failed){{end}}{{else}}–{{end}}</td></tr>{{end}}</tbody>
   </table>
   {{if .Unavailable}}<p class="note">Not included: {{.Unavailable}}. Scores cover the assistants that answered.</p>{{end}}
+  {{if gt .Runs 1}}<p class="note">AI answers vary from run to run, so rates are over all {{.Runs}} runs. Consistency is the share of queries where the assistant mentioned you (or didn't) every time.</p>
+  <table><thead><tr><th>Assistant</th><th class="num">Mentioned, by run</th><th class="num">Recommended, by run</th><th class="num">Consistency</th></tr></thead>
+    <tbody>{{range .Providers}}{{$p := .}}{{with .Spread}}<tr><td style="font-weight:600;color:var(--ink)">{{$p.ProviderName}}</td><td class="num">{{if eq .MentionLow .MentionHigh}}{{.MentionLow}}%{{else}}{{.MentionLow}}–{{.MentionHigh}}%{{end}}</td><td class="num">{{if eq .RecommendLow .RecommendHigh}}{{.RecommendLow}}%{{else}}{{.RecommendLow}}–{{.RecommendHigh}}%{{end}}</td><td class="num">{{.Consistency}}%</td></tr>{{end}}{{end}}</tbody>
+  </table>{{end}}
+  {{if .HasSearch}}
+  <h3>With web search</h3>
+  <p class="note" style="margin-top:0">The same queries answered once more with each assistant's web search: what assistants find, next to what they remember.</p>
+  <div class="grid g3">
+    <div class="card score-card {{scoreClass .Overall}}"><div class="num t-{{scoreClass .Overall}}">{{.Overall}}<span class="den"> / 100</span></div><div class="lbl">Remembered</div><div class="note">Answers from the models' own knowledge</div></div>
+    <div class="card score-card {{scoreClass .SearchScore}}"><div class="num t-{{scoreClass .SearchScore}}">{{.SearchScore}}<span class="den"> / 100</span></div><div class="lbl">Searched</div><div class="note">Answers with live web search</div></div>
+  </div>
+  <table style="margin-top:10px"><thead><tr><th>Assistant</th><th class="num">Mentioned</th><th class="num">Recommended</th><th class="num">Cites your site</th></tr></thead>
+    <tbody>{{range .Providers}}{{$p := .}}{{with .Search}}{{if .Answered}}<tr><td style="font-weight:600;color:var(--ink)">{{$p.ProviderName}}</td><td class="num">{{.MentionRate}}%</td><td class="num">{{.RecommendRate}}%</td><td class="num">{{.OwnSiteRate}}%</td></tr>{{end}}{{end}}{{end}}</tbody>
+  </table>
+  {{if .Cited}}<h3>Sites the searched answers cited</h3>
+  <table><thead><tr><th>Site</th><th class="num">Answers citing it</th></tr></thead>
+    <tbody>{{range .Cited}}<tr><td style="color:var(--ink)">{{.Domain}}{{if .Own}} <span class="chip g">Your site</span>{{end}}</td><td class="num">{{.Answers}}</td></tr>{{end}}</tbody>
+  </table>{{end}}
+  {{end}}
   {{if .Queries}}
   <h3>Query results{{if gt .TotalQueries (len .Queries)}} (first {{len .Queries}} of {{.TotalQueries}}){{end}}</h3>
   <table><thead><tr><th>Query</th><th>Answers</th></tr></thead>
-    <tbody>{{range .Queries}}<tr><td style="color:var(--ink);width:45%">{{.Query.Query}}</td><td>{{range .ProviderResults}}<span class="chip {{if .Recommended}}g{{else if .Mentioned}}a{{else}}n{{end}}" style="margin:1px 3px 1px 0">{{.ProviderName}} {{.Score}}{{if .Recommended}} · recommends{{else if .Mentioned}} · mentions{{end}}</span>{{end}}</td></tr>{{end}}</tbody>
+    <tbody>{{range .Queries}}<tr><td style="color:var(--ink);width:45%">{{.Query}}</td><td>{{range .Answers}}<span class="chip {{if .Recommended}}g{{else if .Mentioned}}a{{else}}n{{end}}" style="margin:1px 3px 1px 0">{{.Provider}}{{if .Search}} (web){{end}} {{.Score}}{{if gt .Of 1}} · mentions {{.Mentioned}}/{{.Of}}{{else if .Recommended}} · recommends{{else if .Mentioned}} · mentions{{end}}</span>{{end}}</td></tr>{{end}}</tbody>
   </table>
   {{end}}
 </section>

@@ -184,8 +184,64 @@ type reportTest struct {
 	Overall      int
 	Providers    []LLMTestSummary
 	Unavailable  string
-	Queries      []LLMTestQueryResult
+	Queries      []reportTestQuery
 	TotalQueries int
+	Runs         int
+	ScoreLow     int
+	ScoreHigh    int
+	HasRange     bool
+	HasSearch    bool
+	SearchScore  int
+	Cited        []LLMTestCitedDomain
+}
+
+// reportTestQuery is one query's answers, one entry per assistant (its runs
+// combined) plus one per assistant's web-search answer.
+type reportTestQuery struct {
+	Query   string
+	Answers []reportTestAnswer
+}
+
+type reportTestAnswer struct {
+	Provider               string
+	Score                  int
+	Mentioned, Recommended int // answers that mentioned / recommended the brand
+	Of                     int // answers graded
+	Search                 bool
+}
+
+// testQueryAnswers combines each assistant's graded answers to one query.
+func testQueryAnswers(qr LLMTestQueryResult) []reportTestAnswer {
+	var out []reportTestAnswer
+	at := map[string]int{}
+	for _, pr := range qr.ProviderResults {
+		if pr.Unscored || strings.HasPrefix(pr.Response, "Error: ") {
+			continue
+		}
+		key := pr.ProviderID
+		if pr.Search {
+			key += "/search"
+		}
+		i, ok := at[key]
+		if !ok {
+			i = len(out)
+			at[key] = i
+			out = append(out, reportTestAnswer{Provider: pr.ProviderName, Search: pr.Search})
+		}
+		a := &out[i]
+		a.Score += pr.Score // summed here, averaged below
+		a.Of++
+		if pr.Mentioned {
+			a.Mentioned++
+		}
+		if pr.Recommended {
+			a.Recommended++
+		}
+	}
+	for i := range out {
+		out[i].Score /= out[i].Of
+	}
+	return out
 }
 
 type reportBib struct {
@@ -408,7 +464,14 @@ func buildReportView(d reportData, now time.Time, mode string) reportView {
 
 	// LLM Test
 	if t := d.LLMTest; t != nil && len(t.ProviderSummaries) > 0 {
-		tv := &reportTest{Overall: t.OverallScore, Providers: t.ProviderSummaries, TotalQueries: len(t.Results)}
+		tv := &reportTest{Overall: t.OverallScore, Providers: t.ProviderSummaries, TotalQueries: len(t.Results),
+			Runs: max(t.Runs, 1), Cited: t.TopCitedDomains}
+		if t.SearchScore != nil {
+			tv.HasSearch, tv.SearchScore = true, *t.SearchScore
+		}
+		if len(t.ScoreRange) == 2 {
+			tv.ScoreLow, tv.ScoreHigh, tv.HasRange = t.ScoreRange[0], t.ScoreRange[1], true
+		}
 		if len(t.UnavailableProviders) > 0 {
 			var notes []string
 			for _, u := range t.UnavailableProviders {
@@ -420,7 +483,9 @@ func buildReportView(d reportData, now time.Time, mode string) reportView {
 		if len(qs) > 15 {
 			qs = qs[:15]
 		}
-		tv.Queries = qs
+		for _, qr := range qs {
+			tv.Queries = append(tv.Queries, reportTestQuery{Query: qr.Query.Query, Answers: testQueryAnswers(qr)})
+		}
 		v.Test = tv
 	}
 	toc("llm-test", "LLM Brand Test", v.Test != nil)
