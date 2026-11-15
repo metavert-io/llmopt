@@ -51,6 +51,15 @@ type Competitor struct {
 	Strengths     string `json:"strengths" bson:"strengths"`
 }
 
+// GuidanceRevision records that a result's advice was updated to a newer
+// research rubric without re-running it (guidance_refresh.go): scores are
+// unchanged, advice the research no longer supports was rewritten or removed.
+type GuidanceRevision struct {
+	Rubric    int       `json:"rubric" bson:"rubric"`
+	RevisedAt time.Time `json:"revised_at" bson:"revisedAt"`
+	Changes   []string  `json:"changes,omitempty" bson:"changes,omitempty"`
+}
+
 type Recommendation struct {
 	Priority       string `json:"priority" bson:"priority"`
 	Action         string `json:"action" bson:"action"`
@@ -86,6 +95,7 @@ type Optimization struct {
 	BrandContextUsed      bool               `json:"brand_context_used" bson:"brandContextUsed"`
 	BrandProfileUpdatedAt *time.Time         `json:"brand_profile_updated_at,omitempty" bson:"brandProfileUpdatedAt,omitempty"`
 	CreatedAt             time.Time          `json:"created_at" bson:"createdAt"`
+	Guidance *GuidanceRevision `json:"guidance,omitempty" bson:"guidance,omitempty"`
 }
 
 // Todo item types
@@ -110,6 +120,7 @@ type TodoItem struct {
 	BackloggedAt    *time.Time          `json:"backlogged_at,omitempty" bson:"backloggedAt,omitempty"`
 	ArchivedAt      *time.Time          `json:"archived_at,omitempty" bson:"archivedAt,omitempty"`
 	Tags            []string            `json:"tags,omitempty" bson:"tags,omitempty"`
+	Guidance        *GuidanceRevision   `json:"guidance,omitempty" bson:"guidance,omitempty"`
 }
 
 // OptimizationSummary is the lightweight shape returned by the optimizations list endpoint.
@@ -454,6 +465,7 @@ type VideoAnalysis struct {
 	Model            string               `json:"model" bson:"model"`
 	BrandContextUsed bool                 `json:"brand_context_used" bson:"brandContextUsed"`
 	GeneratedAt      time.Time            `json:"generated_at" bson:"generatedAt"`
+	Guidance *GuidanceRevision `json:"guidance,omitempty" bson:"guidance,omitempty"`
 }
 
 type VideoAnalysisSummary struct {
@@ -658,6 +670,7 @@ type RedditAnalysis struct {
 	Model            string                  `json:"model" bson:"model"`
 	BrandContextUsed bool                    `json:"brand_context_used" bson:"brandContextUsed"`
 	GeneratedAt      time.Time               `json:"generated_at" bson:"generatedAt"`
+	Guidance *GuidanceRevision `json:"guidance,omitempty" bson:"guidance,omitempty"`
 }
 
 type RedditCache struct {
@@ -754,6 +767,7 @@ type SearchAnalysis struct {
 	Model            string                   `json:"model" bson:"model"`
 	BrandContextUsed bool                     `json:"brand_context_used" bson:"brandContextUsed"`
 	GeneratedAt      time.Time                `json:"generated_at" bson:"generatedAt"`
+	Guidance *GuidanceRevision `json:"guidance,omitempty" bson:"guidance,omitempty"`
 }
 
 type SearchAnalysisSummary struct {

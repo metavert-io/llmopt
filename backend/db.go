@@ -363,6 +363,12 @@ func (m *MongoDB) FailedAnalyses() *mongo.Collection {
 	return m.Database.Collection("failed_analyses")
 }
 
+// GuidanceBackups keeps each document as it was before its advice was
+// updated for a newer research rubric (guidance_refresh.go).
+func (m *MongoDB) GuidanceBackups() *mongo.Collection {
+	return m.Database.Collection("guidance_backups")
+}
+
 // allTenantCollections returns all collections that store tenant-scoped domain data.
 func (m *MongoDB) allTenantCollections() []*mongo.Collection {
 	return []*mongo.Collection{

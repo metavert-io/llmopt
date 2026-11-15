@@ -451,6 +451,7 @@ body.web .cover { height: auto; min-height: 250mm; }
 {{if .RecCount}}
 <section class="sheet" id="recommendations">
   <div class="section-head"><div><div class="eyebrow">What to do</div><h2>Recommendations</h2><div class="lede">The most important of {{.RecCount}} actions from every analysis.</div></div></div>
+  {{if .AdviceUpdated}}<p class="note" style="margin-top:0">The advice in these results was updated on {{.AdviceUpdated}} to reflect the 2026 research; scores are as originally measured.</p>{{end}}
   <p class="note" style="margin-top:0">These recommendations aim at visibility in AI assistants and AI search. They don't weigh your wider business constraints and priorities, so consider them alongside your overall strategy.</p>
   {{if .RecGroups}}<h3>Across YouTube, Reddit and search</h3>{{end}}
   {{range .RecGroups}}
