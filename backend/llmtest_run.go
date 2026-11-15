@@ -6,7 +6,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -48,17 +47,20 @@ type testProviderRun struct {
 	apiKey   string
 	notify   func(string) // progress notes for the client
 
-	mu         sync.Mutex
-	models     []ModelDef // candidates, the chosen model first
-	modelIdx   int
-	switches   int
-	deadErr    error // set once the key, or every model, has failed for good
-	lastErr    error
-	answered   int
-	failed     int
-	pauseUntil time.Time     // no calls before this: the provider asked the run to slow down
-	paused     time.Duration // total pause so far
-	slowNoted  bool
+	mu       sync.Mutex
+	models   []ModelDef // candidates, the chosen model first
+	modelIdx int
+	switches int
+	deadErr  error // set once the key, or every model, has failed for good
+	lastErr  error
+	answered int
+	failed   int
+	// searchAnswered and searchFailed count the web-search pass separately.
+	searchAnswered int
+	searchFailed   int
+	pauseUntil     time.Time     // no calls before this: the provider asked the run to slow down
+	paused         time.Duration // total pause so far
+	slowNoted      bool
 }
 
 func (pr *testProviderRun) currentModel() ModelDef {
@@ -93,34 +95,47 @@ func (pr *testProviderRun) markDead(err error) {
 	}
 }
 
-func (pr *testProviderRun) record(err error) {
+func (pr *testProviderRun) record(err error, search bool) {
 	pr.mu.Lock()
 	defer pr.mu.Unlock()
-	if err == nil {
+	switch {
+	case search && err == nil:
+		pr.searchAnswered++
+	case search:
+		pr.searchFailed++ // not lastErr: that explains why the provider couldn't answer at all
+	case err == nil:
 		pr.answered++
-		return
+	default:
+		pr.failed++
+		pr.lastErr = err
 	}
-	pr.failed++
-	pr.lastErr = err
+}
+
+// canSearch reports whether the provider can answer with web search.
+func (pr *testProviderRun) canSearch() bool {
+	_, ok := pr.provider.(webSearchCaller)
+	return ok
 }
 
 // ask sends one query. It moves to the provider's next model when the current
 // one is retired, isn't available to the key, or (before it has answered
 // anything) times out or stays rate-limited, and stops calling the provider
 // once its key is known to be unusable. skipped is true when no call was made
-// because of an earlier failure.
-func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int) (resp string, model ModelDef, err error, skipped bool) {
+// because of an earlier failure. With search, the query is answered with web
+// search on the current model, once: a failed search doesn't move the
+// provider to another model or stop its other queries.
+func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int, search bool) (resp webSearchAnswer, model ModelDef, err error, skipped bool) {
 	for attempt := 0; attempt <= maxModelSwitches; attempt++ {
 		pr.mu.Lock()
 		model = pr.models[pr.modelIdx]
 		dead := pr.deadErr
 		pr.mu.Unlock()
 		if dead != nil {
-			return "", model, dead, attempt == 0
+			return webSearchAnswer{}, model, dead, attempt == 0
 		}
 
-		resp, err = pr.call(ctx, model, query, maxTokens)
-		if err == nil && strings.TrimSpace(resp) == "" {
+		resp, err = pr.call(ctx, model, query, maxTokens, search)
+		if err == nil && strings.TrimSpace(resp.Text) == "" {
 			// A blank answer would be scored as "brand not mentioned".
 			err = fmt.Errorf("%s returned an empty answer", model.Name)
 		}
@@ -128,12 +143,16 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 			return resp, model, nil, false
 		}
 		if ctx.Err() != nil {
-			return "", model, err, false
+			return webSearchAnswer{}, model, err, false
+		}
+		if search {
+			log.Printf("LLM test: %s (%s) web search failed: %s", pr.provider.Name(), model.ID, truncateStr(err.Error(), 400))
+			return webSearchAnswer{}, model, err, false
 		}
 		log.Printf("LLM test: %s (%s) failed: %s", pr.provider.Name(), model.ID, truncateStr(err.Error(), 400))
 		if pr.pausedTooLong() {
 			pr.markDead(err)
-			return "", model, err, false
+			return webSearchAnswer{}, model, err, false
 		}
 		class := classifyProviderError(err)
 		if (isTimeoutError(err) || isRateLimitQuota(err)) && pr.currentModel().ID != model.ID {
@@ -150,7 +169,7 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 		switch class {
 		case failKey:
 			pr.markDead(err)
-			return "", model, err, false
+			return webSearchAnswer{}, model, err, false
 		case failModel:
 			pr.mu.Lock()
 			if pr.models[pr.modelIdx].ID != model.ID {
@@ -167,24 +186,24 @@ func (pr *testProviderRun) ask(ctx context.Context, query string, maxTokens int)
 			}
 			pr.mu.Unlock()
 			pr.markDead(err)
-			return "", model, err, false
+			return webSearchAnswer{}, model, err, false
 		default:
-			return "", model, err, false
+			return webSearchAnswer{}, model, err, false
 		}
 	}
-	return "", model, err, false
+	return webSearchAnswer{}, model, err, false
 }
 
 // call sends one query to model, waiting out any pause the provider asked for
 // and retrying rate-limit and overload failures. A rate limit pauses all of
 // this provider's queries, not just this one, so its lanes don't keep hitting
 // a limit that has no room.
-func (pr *testProviderRun) call(ctx context.Context, model ModelDef, query string, maxTokens int) (string, error) {
+func (pr *testProviderRun) call(ctx context.Context, model ModelDef, query string, maxTokens int, search bool) (webSearchAnswer, error) {
 	for attempt := 0; ; attempt++ {
 		if err := pr.waitPause(ctx); err != nil {
-			return "", err
+			return webSearchAnswer{}, err
 		}
-		resp, err := pr.callNotingSlow(ctx, model, query, maxTokens)
+		resp, err := pr.callNotingSlow(ctx, model, query, maxTokens, search)
 		if err == nil || ctx.Err() != nil || classifyProviderError(err) != failRetry {
 			return resp, err
 		}
@@ -193,7 +212,7 @@ func (pr *testProviderRun) call(ctx context.Context, model ModelDef, query strin
 			retries = maxRateLimitRetries
 		}
 		if attempt >= retries || !pr.pause(retryWait(attempt, err), err) {
-			return "", err
+			return webSearchAnswer{}, err
 		}
 	}
 }
@@ -201,7 +220,7 @@ func (pr *testProviderRun) call(ctx context.Context, model ModelDef, query strin
 // callNotingSlow makes one provider call and, if it takes longer than
 // slowCallNote, tells the user once per run that this provider is slow. The
 // note is sent before the call returns, never after the run has finished.
-func (pr *testProviderRun) callNotingSlow(ctx context.Context, model ModelDef, query string, maxTokens int) (string, error) {
+func (pr *testProviderRun) callNotingSlow(ctx context.Context, model ModelDef, query string, maxTokens int, search bool) (webSearchAnswer, error) {
 	done := make(chan struct{})
 	watched := make(chan struct{})
 	go func() {
@@ -214,7 +233,15 @@ func (pr *testProviderRun) callNotingSlow(ctx context.Context, model ModelDef, q
 			pr.noteSlow(model)
 		}
 	}()
-	resp, err := pr.provider.Call(ctx, pr.apiKey, model.ID, query, maxTokens)
+	var resp webSearchAnswer
+	var err error
+	if ws, ok := pr.provider.(webSearchCaller); search && ok {
+		resp, err = ws.CallWithWebSearch(ctx, pr.apiKey, model.ID, query, maxTokens)
+	} else if search {
+		err = fmt.Errorf("%s can't answer with web search here", pr.provider.Name())
+	} else {
+		resp.Text, err = pr.provider.Call(ctx, pr.apiKey, model.ID, query, maxTokens)
+	}
 	close(done)
 	<-watched
 	return resp, err
@@ -369,29 +396,5 @@ func joinNames(names []string) string {
 	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
-// testEvaluation is the evaluator's verdict on each query/provider answer.
-type testEvaluation struct {
-	Evaluations []struct {
-		QueryIndex  int    `json:"query_index"`
-		ProviderID  string `json:"provider_id"`
-		Mentioned   bool   `json:"mentioned"`
-		Recommended bool   `json:"recommended"`
-		Sentiment   string `json:"sentiment"`
-		Accuracy    string `json:"accuracy"`
-		Score       int    `json:"score"`
-	} `json:"evaluations"`
-}
-
-// parseTestEvaluation reads the evaluator's JSON, tolerating code fences and
-// surrounding prose.
-func parseTestEvaluation(raw string, out *testEvaluation) error {
-	if err := json.Unmarshal([]byte(stripJSONFencing(raw)), out); err == nil {
-		return nil
-	}
-	if j := extractJSON(raw); j != "" {
-		if err := json.Unmarshal([]byte(j), out); err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("evaluation is not valid JSON")
-}
+// errEvalNotJSON: the evaluator's reply couldn't be read.
+var errEvalNotJSON = fmt.Errorf("evaluation is not valid JSON")

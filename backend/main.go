@@ -4175,10 +4175,25 @@ func buildDomainSummaryPrompt(domain string, optimizations []Optimization, analy
 	// LLM Test (what the assistants answered)
 	if t := extras.LLMTest; t != nil && len(t.ProviderSummaries) > 0 {
 		sections.WriteString("\n=== LLM TEST (answers from AI assistants) ===\n")
-		sections.WriteString(fmt.Sprintf("Overall LLM Test Score: %d/100 over %d queries\n", t.OverallScore, len(t.Queries)))
+		sections.WriteString(fmt.Sprintf("Overall LLM Test Score: %d/100 over %d queries", t.OverallScore, len(t.Queries)))
+		if t.Runs > 1 {
+			sections.WriteString(fmt.Sprintf(", each asked %d times", t.Runs))
+			if len(t.ScoreRange) == 2 {
+				sections.WriteString(fmt.Sprintf(" (the score ranged %d–%d between runs)", t.ScoreRange[0], t.ScoreRange[1]))
+			}
+		}
+		sections.WriteString("\n")
 		for _, p := range t.ProviderSummaries {
-			sections.WriteString(fmt.Sprintf("- %s: %d/100 (mentioned in %d%%, recommended in %d%%, accurate in %d%%)\n",
+			sections.WriteString(fmt.Sprintf("- %s: %d/100 (mentioned in %d%%, recommended in %d%%, accurate in %d%%)",
 				p.ProviderName, p.OverallScore, p.MentionRate, p.RecommendRate, p.AccuracyRate))
+			if p.Search != nil && p.Search.Answered > 0 {
+				sections.WriteString(fmt.Sprintf("; with web search %d/100, mentioned in %d%%, citing the site in %d%%",
+					p.Search.OverallScore, p.Search.MentionRate, p.Search.OwnSiteRate))
+			}
+			sections.WriteString("\n")
+		}
+		if t.SearchScore != nil {
+			sections.WriteString(fmt.Sprintf("With web search (what assistants find, vs. what they remember): %d/100\n", *t.SearchScore))
 		}
 	}
 
@@ -8193,11 +8208,15 @@ func extractJSON(text string) string {
 // ==================== LLM Test Handlers ====================
 
 type testRawResponse struct {
+	id           int // index in the run's responses; the evaluator refers to it
 	providerID   string
 	providerName string
 	model        string
 	queryIdx     int
+	run          int  // 1-based repeat of the query
+	search       bool // answered with web search
 	response     string
+	sources      []string
 	err          error
 }
 
@@ -8533,11 +8552,6 @@ func handleDeleteLLMTest(mongoDB *MongoDB) http.HandlerFunc {
 
 func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnabled bool) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Generous budget: Phase 1 runs many provider calls (in parallel) plus
-		// a large evaluation pass. 15 min leaves headroom for big provider matrices.
-		ctx, cancel := context.WithTimeout(r.Context(), 15*time.Minute)
-		defer cancel()
-		r = r.WithContext(ctx)
 		startTime := time.Now()
 
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -8558,11 +8572,27 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			Models       map[string]string `json:"models"`        // providerID → modelID override
 			CompetitorOf string            `json:"competitor_of"` // if set, this is a competitor test for the given primary domain
 			Force        bool              `json:"force"`
+			Runs         int               `json:"runs"`       // times each query is asked (1-5; default 1)
+			WebSearch    bool              `json:"web_search"` // also answer each query once with web search
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			sendSSE(w, flusher, "error", map[string]string{"message": "Invalid request body"})
 			return
 		}
+		req.Runs = clampTestRuns(req.Runs)
+		// Generous budget: many provider calls (in parallel) plus the evaluation
+		// passes; 15 minutes per pass over the queries, at most 45.
+		passes := req.Runs
+		if req.WebSearch {
+			passes++
+		}
+		budget := time.Duration(passes) * 15 * time.Minute
+		if budget > 45*time.Minute {
+			budget = 45 * time.Minute
+		}
+		ctx, cancel := context.WithTimeout(r.Context(), budget)
+		defer cancel()
+		r = r.WithContext(ctx)
 		req.Domain = normalizeDomain(req.Domain)
 		if req.Domain == "" {
 			sendSSE(w, flusher, "error", map[string]string{"message": "Domain is required"})
@@ -8669,52 +8699,92 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			}
 		}
 
-		// Phase 1: ask every provider every query. Each provider works through the
-		// queries in its own lanes (testCallsPerProvider at a time), so a slow or
-		// rate-limited provider holds up only its own queries, never the others'.
-		// Per-call failures are recorded, never fatal.
-		totalCalls := len(req.Queries) * len(runs)
-		notify(fmt.Sprintf("Testing %d queries across %d providers (%d total calls)...", len(req.Queries), len(runs), totalCalls))
+		// Phase 1: ask every provider every query, req.Runs times, and once more
+		// with web search if asked. Each provider works through its queue in its
+		// own lanes (testCallsPerProvider at a time), so a slow or rate-limited
+		// provider holds up only its own queries, never the others'. Per-call
+		// failures are recorded, never fatal.
+		type testWork struct {
+			qi, run int
+			search  bool
+		}
+		queues := make([][]testWork, len(runs))
+		totalCalls := 0
+		for i, run := range runs {
+			for rn := 1; rn <= req.Runs; rn++ {
+				for qi := range req.Queries {
+					queues[i] = append(queues[i], testWork{qi, rn, false})
+				}
+			}
+			if req.WebSearch {
+				if run.canSearch() {
+					for qi := range req.Queries {
+						queues[i] = append(queues[i], testWork{qi, 1, true})
+					}
+				} else {
+					notify(fmt.Sprintf("%s can't answer with web search here; it answers from memory only.", run.provider.Name()))
+				}
+			}
+			totalCalls += len(queues[i])
+		}
+		plan := fmt.Sprintf("Testing %d queries across %d providers", len(req.Queries), len(runs))
+		if req.Runs > 1 {
+			plan += fmt.Sprintf(", %d runs each", req.Runs)
+		}
+		if req.WebSearch {
+			plan += ", plus a pass with web search"
+		}
+		notify(fmt.Sprintf("%s (%d total calls)...", plan, totalCalls))
 
 		responses := make([]testRawResponse, 0, totalCalls)
 		var respMu sync.Mutex
 		completedCalls := 0
 
 		var lanes sync.WaitGroup
-		for _, run := range runs {
-			queue := make(chan int, len(req.Queries))
-			for qi := range req.Queries {
-				queue <- qi
+		for i, run := range runs {
+			queue := make(chan testWork, len(queues[i]))
+			for _, wk := range queues[i] {
+				queue <- wk
 			}
 			close(queue)
 			for lane := 0; lane < testCallsPerProvider; lane++ {
 				lanes.Add(1)
-				go func(run *testProviderRun, queue <-chan int) {
+				go func(run *testProviderRun, queue <-chan testWork) {
 					defer lanes.Done()
-					for qi := range queue {
-						query := req.Queries[qi].Query
-						resp, model, err, skipped := run.ask(r.Context(), query, 4096)
-						run.record(err)
+					for wk := range queue {
+						query := req.Queries[wk.qi].Query
+						resp, model, err, skipped := run.ask(r.Context(), query, 4096, wk.search)
+						run.record(err, wk.search)
 						respMu.Lock()
 						completedCalls++
 						n := completedCalls
 						responses = append(responses, testRawResponse{
+							id:           len(responses),
 							providerID:   run.provider.ProviderID(),
 							providerName: run.provider.Name(),
 							model:        model.Name,
-							queryIdx:     qi,
-							response:     resp,
+							queryIdx:     wk.qi,
+							run:          wk.run,
+							search:       wk.search,
+							response:     resp.Text,
+							sources:      resp.Sources,
 							err:          err,
 						})
 						respMu.Unlock()
 						if skipped {
 							continue
 						}
+						tag := ""
+						if wk.search {
+							tag = " (web search)"
+						} else if req.Runs > 1 {
+							tag = fmt.Sprintf(" (run %d)", wk.run)
+						}
 						outcome := ""
 						if err != nil {
 							outcome = " — no answer"
 						}
-						notify(fmt.Sprintf("[%d/%d] %s (%s): \"%s\"%s", n, totalCalls, run.provider.Name(), model.Name, truncateStr(query, 60), outcome))
+						notify(fmt.Sprintf("[%d/%d] %s (%s)%s: \"%s\"%s", n, totalCalls, run.provider.Name(), model.Name, tag, truncateStr(query, 60), outcome))
 					}
 				}(run, queue)
 			}
@@ -8724,7 +8794,8 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			return // client went away or the budget ran out
 		}
 
-		// Providers that answered nothing are reported, not scored as zero.
+		// Providers that answered nothing (from memory) are reported, not
+		// scored as zero.
 		var active []*testProviderRun
 		var failedNames []string
 		dead := map[string]bool{}
@@ -8755,10 +8826,16 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			}
 			notify(fmt.Sprintf("Continuing with %s; %s couldn't answer.", joinNames(okNames), joinNames(failedNames)))
 		}
+		var scoredResponses []testRawResponse
+		for _, resp := range responses {
+			if !dead[resp.providerID] {
+				scoredResponses = append(scoredResponses, resp)
+			}
+		}
 
-		// Phase 2: evaluate the answers. Try the tenant's primary provider first,
-		// then the providers that just answered (their keys are known to work).
-		evalPrompt := buildTestEvaluationPrompt(brandName, req.Domain, brandInfo, req.Queries, responses)
+		// Phase 2: evaluate the answers, in batches. Try the tenant's primary
+		// provider first, then the providers that just answered (their keys
+		// are known to work).
 		type evalCandidate struct {
 			provider LLMProvider
 			apiKey   string
@@ -8789,147 +8866,146 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			}
 			cands = append(cands, evalCandidate{run.provider, run.apiKey, evalModelFor(run.provider, run.apiKey, "")})
 		}
-
-		var evalResult testEvaluation
-		var evalErrs []string
-		evaluated := false
-		for _, c := range cands {
-			notify(fmt.Sprintf("Evaluating responses against brand profile (%s)...", c.provider.Name()))
-			evalResp, err := callWithRetry(r.Context(), c.provider, c.apiKey, c.model, evalPrompt, 16384)
-			if err != nil && classifyProviderError(err) == failModel {
-				// The chosen model is gone; try the best one this key can use.
-				if models, _ := availableModels(r.Context(), c.provider, c.apiKey); len(models) > 0 && models[0].ID != c.model {
-					evalResp, err = callWithRetry(r.Context(), c.provider, c.apiKey, models[0].ID, evalPrompt, 16384)
-				}
-			}
-			if err != nil {
-				log.Printf("LLM test evaluation with %s (%s) failed: %v", c.provider.Name(), c.model, err)
-				evalErrs = append(evalErrs, fmt.Sprintf("%s: %s", c.provider.Name(), truncateStr(err.Error(), 200)))
-				continue
-			}
-			if err := parseTestEvaluation(evalResp, &evalResult); err != nil {
-				log.Printf("LLM test evaluation from %s unreadable: %v — raw: %s", c.provider.Name(), err, truncateStr(evalResp, 200))
-				evalErrs = append(evalErrs, fmt.Sprintf("%s: the evaluation couldn't be read", c.provider.Name()))
-				continue
-			}
-			evaluated = true
-			break
-		}
-		if !evaluated {
-			msg := "Evaluation failed: " + strings.Join(evalErrs, "; ")
-			if len(cands) == 0 {
-				msg = "No API key available to evaluate results. Add an API key for your primary provider (or one of the providers you're testing) in Settings."
-			}
-			sendSSE(w, flusher, "error", map[string]string{"message": msg})
+		if len(cands) == 0 {
+			sendSSE(w, flusher, "error", map[string]string{"message": "No API key available to evaluate results. Add an API key for your primary provider (or one of the providers you're testing) in Settings."})
 			return
 		}
 
-		// Index the evaluations by query and provider. Evaluators sometimes give
-		// the provider's name instead of its ID, so accept either.
+		// Evaluators sometimes give the provider's name instead of its ID.
 		idByName := map[string]string{}
 		for _, run := range runs {
 			idByName[strings.ToLower(run.provider.Name())] = run.provider.ProviderID()
 			idByName[strings.ToLower(run.provider.ProviderID())] = run.provider.ProviderID()
 		}
-		type evalKey struct {
-			queryIdx   int
-			providerID string
-		}
-		evals := map[evalKey]int{}
-		for i, e := range evalResult.Evaluations {
-			if pid, ok := idByName[strings.ToLower(strings.TrimSpace(e.ProviderID))]; ok {
-				evals[evalKey{e.QueryIndex, pid}] = i
+		batches := evalBatches(scoredResponses)
+		if len(batches) > 1 {
+			graded := 0
+			for _, b := range batches {
+				graded += len(b)
 			}
+			notify(fmt.Sprintf("Evaluating %d answers against the brand profile in %d batches...", graded, len(batches)))
+		}
+		evals := map[int]testEvalEntry{}
+		var evalMu sync.Mutex
+		var evalErrs []string
+		sem := make(chan struct{}, evalParallel)
+		var evalWG sync.WaitGroup
+		for bi, batch := range batches {
+			evalWG.Add(1)
+			go func(bi int, batch []testRawResponse) {
+				defer evalWG.Done()
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				evalPrompt := buildTestEvaluationPrompt(brandName, req.Domain, brandInfo, req.Queries, batch)
+				var batchErrs []string
+				for _, c := range cands {
+					if len(batches) == 1 {
+						notify(fmt.Sprintf("Evaluating responses against brand profile (%s)...", c.provider.Name()))
+					}
+					evalResp, err := callWithRetry(r.Context(), c.provider, c.apiKey, c.model, evalPrompt, 16384)
+					if err != nil && classifyProviderError(err) == failModel {
+						// The chosen model is gone; try the best one this key can use.
+						if models, _ := availableModels(r.Context(), c.provider, c.apiKey); len(models) > 0 && models[0].ID != c.model {
+							evalResp, err = callWithRetry(r.Context(), c.provider, c.apiKey, models[0].ID, evalPrompt, 16384)
+						}
+					}
+					if err != nil {
+						log.Printf("LLM test evaluation with %s (%s) failed: %v", c.provider.Name(), c.model, err)
+						batchErrs = append(batchErrs, fmt.Sprintf("%s: %s", c.provider.Name(), truncateStr(err.Error(), 200)))
+						continue
+					}
+					var ev testEvaluation
+					if err := parseTestEvaluation(evalResp, &ev); err != nil {
+						log.Printf("LLM test evaluation from %s unreadable: %v — raw: %s", c.provider.Name(), err, truncateStr(evalResp, 200))
+						batchErrs = append(batchErrs, fmt.Sprintf("%s: the evaluation couldn't be read", c.provider.Name()))
+						continue
+					}
+					matched := matchEvaluations(batch, ev.Evaluations, idByName)
+					evalMu.Lock()
+					for id, e := range matched {
+						evals[id] = e
+					}
+					evalMu.Unlock()
+					if len(batches) > 1 {
+						notify(fmt.Sprintf("Evaluated batch %d of %d (%s).", bi+1, len(batches), c.provider.Name()))
+					}
+					return
+				}
+				evalMu.Lock()
+				evalErrs = append(evalErrs, batchErrs...)
+				evalMu.Unlock()
+			}(bi, batch)
+		}
+		evalWG.Wait()
+		if len(evalErrs) > 0 {
+			sendSSE(w, flusher, "error", map[string]string{"message": "Evaluation failed: " + strings.Join(evalErrs, "; ")})
+			return
 		}
 
-		// Build per-query results for the providers that answered, in the order
-		// the providers were selected.
+		// Per-query results for the providers that answered, in the order the
+		// providers were selected; the remembered answers by run, then the
+		// web-search answer.
 		order := map[string]int{}
 		for i, run := range runs {
 			order[run.provider.ProviderID()] = i
 		}
-		sort.SliceStable(responses, func(i, j int) bool {
-			if responses[i].queryIdx != responses[j].queryIdx {
-				return responses[i].queryIdx < responses[j].queryIdx
+		sort.SliceStable(scoredResponses, func(i, j int) bool {
+			a, b := scoredResponses[i], scoredResponses[j]
+			if a.queryIdx != b.queryIdx {
+				return a.queryIdx < b.queryIdx
 			}
-			return order[responses[i].providerID] < order[responses[j].providerID]
+			if order[a.providerID] != order[b.providerID] {
+				return order[a.providerID] < order[b.providerID]
+			}
+			if a.search != b.search {
+				return !a.search
+			}
+			return a.run < b.run
 		})
 		queryResults := make([]LLMTestQueryResult, len(req.Queries))
 		for qi, q := range req.Queries {
 			queryResults[qi] = LLMTestQueryResult{Query: q, ProviderResults: []LLMTestProviderResult{}}
 		}
-		type tally struct{ score, mentioned, recommended, accurate, sentiment, answered int }
-		tallies := map[string]*tally{}
-		for _, run := range active {
-			tallies[run.provider.ProviderID()] = &tally{}
-		}
-		for _, resp := range responses {
-			t := tallies[resp.providerID]
-			if t == nil {
-				continue // provider answered nothing; listed as unavailable instead
-			}
+		for _, resp := range scoredResponses {
 			pr := LLMTestProviderResult{
 				ProviderID:   resp.providerID,
 				ProviderName: resp.providerName,
 				Model:        resp.model,
 				Response:     resp.response,
+				Run:          resp.run,
+				Search:       resp.search,
+				Citations:    resp.sources,
+			}
+			for _, u := range resp.sources {
+				if isOwnSite(u, req.Domain) {
+					pr.CitesOwnSite = true
+					break
+				}
 			}
 			if resp.err != nil {
 				pr.Response = "Error: " + truncateStr(resp.err.Error(), 300)
 				pr.Sentiment = "absent"
 				pr.Accuracy = "not_applicable"
+			} else if e, ok := evals[resp.id]; ok {
+				pr.Mentioned, pr.Recommended = e.Mentioned, e.Recommended
+				pr.Sentiment, pr.Accuracy, pr.Score = e.Sentiment, e.Accuracy, e.Score
 			} else {
-				t.answered++
-				if i, ok := evals[evalKey{resp.queryIdx, resp.providerID}]; ok {
-					e := evalResult.Evaluations[i]
-					pr.Mentioned, pr.Recommended = e.Mentioned, e.Recommended
-					pr.Sentiment, pr.Accuracy, pr.Score = e.Sentiment, e.Accuracy, e.Score
-				}
-				t.score += pr.Score
-				if pr.Mentioned {
-					t.mentioned++
-				}
-				if pr.Recommended {
-					t.recommended++
-				}
-				if pr.Accuracy == "accurate" {
-					t.accurate++
-				}
-				switch pr.Sentiment {
-				case "positive":
-					t.sentiment += 100
-				case "neutral":
-					t.sentiment += 50
-				case "negative":
-					t.sentiment += 10
-				}
+				pr.Unscored = true
 			}
 			queryResults[resp.queryIdx].ProviderResults = append(queryResults[resp.queryIdx].ProviderResults, pr)
 		}
 
-		// Per-provider summaries; rates are over the queries each provider answered.
-		var summaries []LLMTestSummary
-		overallTotal := 0
+		// Per-provider summaries: rates over every answered run, the range
+		// between runs, and the web-search pass.
+		var infos []testProviderInfo
 		for _, run := range active {
-			t := tallies[run.provider.ProviderID()]
-			s := LLMTestSummary{
-				ProviderID:   run.provider.ProviderID(),
-				ProviderName: run.provider.Name(),
-				Model:        run.currentModel().Name,
-				Answered:     t.answered,
-				Failed:       run.failed,
-			}
-			if n := t.answered; n > 0 {
-				s.OverallScore = t.score / n
-				s.MentionRate = t.mentioned * 100 / n
-				s.RecommendRate = t.recommended * 100 / n
-				s.AccuracyRate = t.accurate * 100 / n
-				s.SentimentScore = t.sentiment / n
-			}
-			overallTotal += s.OverallScore
-			summaries = append(summaries, s)
+			infos = append(infos, testProviderInfo{
+				id: run.provider.ProviderID(), name: run.provider.Name(), model: run.currentModel().Name,
+				failed: run.failed, searchFailed: run.searchFailed,
+			})
 		}
-		overallScore := overallTotal / len(summaries)
+		sum := summarizeTest(infos, queryResults, req.Runs, req.Domain)
+		summaries, overallScore := sum.providers, sum.overall
 
 		// Determine run number
 		runNumber := 1
@@ -8956,6 +9032,12 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 			OverallScore:         overallScore,
 			BrandContextUsed:     brandInfo.Used,
 			GeneratedAt:          time.Now(),
+			Runs:                 req.Runs,
+			ScoreRange:           sum.scoreRange,
+			WebSearch:            req.WebSearch,
+			SearchScore:          sum.searchScore,
+			TopCitedDomains:      sum.topCitedDomains,
+			RubricVersion:        scoringRubricVersion,
 		}
 
 		// Save to DB (insert new document for history tracking)
@@ -8969,6 +9051,12 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 		}
 
 		doneMsg := fmt.Sprintf("Test complete — Overall Score: %d/100", overallScore)
+		if len(sum.scoreRange) == 2 && sum.scoreRange[0] != sum.scoreRange[1] {
+			doneMsg += fmt.Sprintf(" (%d–%d across %d runs)", sum.scoreRange[0], sum.scoreRange[1], req.Runs)
+		}
+		if sum.searchScore != nil {
+			doneMsg += fmt.Sprintf("; with web search: %d/100", *sum.searchScore)
+		}
 		if len(unavailable) > 0 {
 			var names []string
 			for _, u := range unavailable {
@@ -9046,7 +9134,9 @@ For each query-response pair, evaluate:
 2. **recommended**: Is the brand recommended, suggested, or positioned as a good option? (boolean)
 3. **sentiment**: Overall sentiment toward the brand in the response. Use "absent" if the brand isn't mentioned at all. (positive/neutral/negative/absent)
 4. **accuracy**: Are factual claims about the brand accurate based on the brand information above? Use "not_applicable" if brand isn't discussed. (accurate/partially_accurate/inaccurate/not_applicable)
-5. **score**: Overall brand representation quality 0-100. Consider: Is the brand mentioned? Positioned favorably? Information accurate? Recommended when relevant?
+5. **score**: Overall brand representation quality 0-100. Consider: Is the brand mentioned? Described favorably? Information accurate? Recommended when relevant? Don't reward or penalize where the brand appears in a list: the order of AI answer lists changes from run to run.
+
+The same query may appear several times for one assistant (it was asked more than once, or once with web search). Grade each response on its own.
 
 ## Query-Response Pairs
 
@@ -9056,19 +9146,23 @@ For each query-response pair, evaluate:
 		if resp.err != nil {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf(`### Query %d (asked to %s, provider_id: %s)
+		mode := ""
+		if resp.search {
+			mode = ", answered with web search"
+		}
+		sb.WriteString(fmt.Sprintf(`### Response R%d — Query %d (asked to %s, provider_id: %s%s)
 **Query**: %s
 **Response**: %s
 
-`, resp.queryIdx, resp.providerName, resp.providerID, queries[resp.queryIdx].Query, resp.response))
+`, resp.id, resp.queryIdx, resp.providerName, resp.providerID, mode, queries[resp.queryIdx].Query, resp.response))
 	}
 
 	sb.WriteString(`## Output Format
 
 Return ONLY a JSON object with this exact structure:
-{"evaluations": [{"query_index": 0, "provider_id": "anthropic", "mentioned": true, "recommended": false, "sentiment": "neutral", "accuracy": "accurate", "score": 65}, ...]}
+{"evaluations": [{"response_id": "R0", "query_index": 0, "provider_id": "anthropic", "mentioned": true, "recommended": false, "sentiment": "neutral", "accuracy": "accurate", "score": 65}, ...]}
 
-Include one evaluation entry per query-response pair. Return ONLY the JSON object, no markdown fencing.`)
+Include one evaluation entry per response, with its response_id. Return ONLY the JSON object, no markdown fencing.`)
 
 	return sb.String()
 }

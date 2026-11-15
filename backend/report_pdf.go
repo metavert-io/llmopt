@@ -854,26 +854,32 @@ func buildReportPDF(
 				}
 				pdf.CellFormat(0, 5, pdfText(query), "", 1, "L", false, 0, "")
 				pdf.SetFont("Helvetica", "", 8)
-				for _, pr := range qr.ProviderResults {
+				for _, a := range testQueryAnswers(qr) {
 					pdf.SetTextColor(100, 100, 100)
-					nameStr := pr.ProviderName
+					nameStr := a.Provider
 					if len(nameStr) > 15 {
 						nameStr = nameStr[:12] + "..."
 					}
+					if a.Search {
+						nameStr += " (web)"
+					}
 					pdf.CellFormat(28, 4.5, pdfText("  "+nameStr), "", 0, "L", false, 0, "")
-					psr, psg, psb := scoreToRGB(pr.Score)
+					psr, psg, psb := scoreToRGB(a.Score)
 					pdf.SetTextColor(psr, psg, psb)
-					pdf.CellFormat(12, 4.5, pdfText(fmt.Sprintf("%d", pr.Score)), "", 0, "L", false, 0, "")
+					pdf.CellFormat(12, 4.5, pdfText(fmt.Sprintf("%d", a.Score)), "", 0, "L", false, 0, "")
 					pdf.SetTextColor(100, 100, 100)
-					mentioned := "not mentioned"
-					if pr.Mentioned {
-						mentioned = "mentioned"
+					var outcome string
+					switch {
+					case a.Of > 1:
+						outcome = fmt.Sprintf("mentioned in %d of %d runs, recommended in %d", a.Mentioned, a.Of, a.Recommended)
+					case a.Recommended > 0:
+						outcome = "mentioned, recommended"
+					case a.Mentioned > 0:
+						outcome = "mentioned"
+					default:
+						outcome = "not mentioned"
 					}
-					recommended := ""
-					if pr.Recommended {
-						recommended = ", recommended"
-					}
-					pdf.CellFormat(0, 4.5, pdfText(mentioned+recommended), "", 1, "L", false, 0, "")
+					pdf.CellFormat(0, 4.5, pdfText(outcome), "", 1, "L", false, 0, "")
 				}
 				pdf.Ln(1.5)
 			}
