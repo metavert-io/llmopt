@@ -180,13 +180,14 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
   Research Digest
 </h3>
 <div class="digest">
-  <p><strong>Brand Recognition vs. Discovery.</strong> A key framework throughout LLM Optimizer is the distinction between <em>brand recognition</em> &#8212; how well AI represents your brand when people search for it by name &#8212; and <em>inbound discovery</em> &#8212; how often AI surfaces your brand when people search your category without prior knowledge of you. Both matter, but they require different strategies. Brand recognition improves through authority signals, earned media, and training data presence. Discovery requires appearing in category-level content, answering the questions your audience asks before they know you exist, and being present in the YouTube videos, Reddit threads, and web pages that LLMs cite for category queries.</p>
-  <p>The emerging science of LLM visibility reveals a fundamental shift in how information gains authority online. The most significant recent finding comes from <a href="#nanoknow">NanoKnow (2026)</a>, which demonstrates that content appearing frequently in training data more than doubles a model's accuracy on related questions &#8212; and that the advantage compounds when content is both memorized during training and retrievable at inference time. This means the traditional SEO playbook of optimizing for a single ranking algorithm is being replaced by a dual imperative: getting into training corpora through widespread, high-quality publication, while simultaneously remaining citable through structured, authoritative web presence.</p>
-  <p>Across the research, a consistent pattern emerges: AI search engines overwhelmingly favor earned media over brand-owned content, citing third-party sources <a href="#geo-toronto">72-92% of the time</a>. Content that includes quotations from authoritative sources gains <a href="#geo-princeton">+41% visibility</a> &#8212; the single most effective optimization technique identified. Meanwhile, YouTube has rapidly become the dominant social citation source for LLMs, with its <a href="#youtube-citations">share doubling to 39%</a> between August and December 2024. Critically, <a href="#livecc">video LLMs process content through transcripts</a>, not visual analysis &#8212; a 7B model trained on YouTube transcripts outperformed 72B models, proving that transcript quality matters far more than production value.</p>
-  <p>Reddit has emerged as the <a href="#youtube-citations">#2 social citation source for LLMs</a>, with unique authority dynamics. Reddit was foundational in LLM training through datasets like <a href="#reddit-webtext">WebText</a> and the <a href="#reddit-common-crawl">Common Crawl</a>, and continues through <a href="#reddit-data-deals">$60M (Google) and $70M (OpenAI) annual licensing deals</a>. Unlike YouTube's channel-centric authority, Reddit's influence comes from <a href="#reddit-community-consensus">multi-user validation</a> &#8212; upvoted comment consensus, especially in "best X for Y" recommendation threads, creates credibility signals that LLMs weight heavily. The <a href="#geo-toronto">Toronto GEO paper</a> classifies Reddit as "Social" &#8212; a category AI search engines suppress in direct citations &#8212; yet Reddit's pervasive presence in training data means it heavily shapes baseline model knowledge even when not explicitly cited.</p>
-  <p>A critical "two-world" split has emerged between Google AI Overviews and standalone LLMs. <a href="#ahrefs-aio-citations">76% of AI Overview citations</a> pull from top-10 organic pages &#8212; making traditional search rankings the primary signal for AIO inclusion. But for standalone LLMs like ChatGPT, <a href="#ahrefs-ai-search-overlap">only 12% of cited URLs rank in Google's top 10</a>. The <a href="#ahrefs-75k-brands">strongest predictor of AI citation across platforms is YouTube mentions (0.737 correlation)</a>, followed by web mentions (0.664) &#8212; not backlinks. Meanwhile, content freshness has become a significant signal: AI assistants cite content that is <a href="#ahrefs-freshness">25.7% newer</a> than traditional search results, and <a href="#seer-recency">65% of AI bot crawl hits target content less than a year old</a>. The <a href="#cloudflare-ai-crawlers">explosive growth of AI crawlers (GPTBot up 305% YoY)</a> makes robots.txt policy a direct lever for AI visibility.</p>
-  <p>However, this new landscape comes with important caveats. Citation accuracy across AI answer engines remains <a href="#false-promise">surprisingly poor (49-68%)</a>, with nearly a third of claims lacking any source backing. Citation concentration follows power-law dynamics, where the <a href="#news-citing-patterns">top 20 sources capture 28-67% of all citations</a>. And LLMs exhibit strong <a href="#lost-in-the-middle">positional bias</a>, reliably attending to content at the beginning and end of context while ignoring the middle.</p>
-  <p>Compounding these challenges, <a href="#resoneo-citation-collapse">model updates can sharply reduce citation volume</a>. When GPT-5.3 replaced GPT-4o as ChatGPT's default, unique domains cited per response dropped 20.5% overnight &#8212; meaning brands that had achieved dynamic visibility through real-time retrieval lost it without any change on their end. This volatility reinforces the importance of <em>parametric</em> visibility (being embedded in training data) alongside dynamic visibility (being citable at inference time). Research into <a href="#dejan-brand-authority">LLM parametric memory</a> reveals that network centrality &#8212; being densely associated with high-authority brands in a model's knowledge graph &#8212; outweighs raw mention frequency. A brand that appears alongside category leaders in training data gains disproportionate visibility, even if it is mentioned less often overall. Together, these findings inform LLM Optimizer's scoring frameworks across answer optimization, video authority, Reddit authority, and search visibility analysis.</p>
+  <p><strong>Brand Recognition vs. Discovery.</strong> A key framework throughout LLM Optimizer is the distinction between <em>brand recognition</em> &#8212; how well AI represents your brand when people search for it by name &#8212; and <em>inbound discovery</em> &#8212; how often AI surfaces your brand when people search your category without prior knowledge of you. Both matter, but they require different strategies. Brand recognition improves through authority signals, earned media, and training data presence. Discovery requires appearing in category-level content, answering the questions your audience asks before they know you exist, and being present in the YouTube videos, Wikipedia pages, review sites, comparison lists and community threads that AI assistants draw on for category queries.</p>
+  <p>The emerging science of LLM visibility distinguishes two ways a brand becomes known to AI. <em>Parametric</em> visibility is what a model learned in training; <em>dynamic</em> visibility is what it finds when it searches the web while answering. <a href="#nanoknow">NanoKnow (SIGIR 2026)</a> shows, on small open models, that how often an answer appears in the training data strongly affects whether a model knows it, and that retrieved evidence and training knowledge complement each other. Both matter in practice: ChatGPT searched the web for <a href="#semrush-chatgpt-2026">about 34.5% of US prompts</a> in early 2026 and answered the rest from what it had learned. The dual imperative holds: be published widely enough to be learned, and be retrievable and citable when assistants search.</p>
+  <p>Across the research, AI search engines favor earned media over brand-owned content, citing independent third-party sources <a href="#geo-toronto">72-92% of the time</a>. Third-party coverage now very much includes video: YouTube is the <a href="#ahrefs-most-cited-aio">most-cited domain in Google AI Overviews (24.5%)</a> and <a href="#digiday-youtube">across AI assistants</a>, and Wikipedia is <a href="#ahrefs-most-cited-chatgpt">ChatGPT's most-cited domain</a>. What has not held up is the 2023 headline that adding quotations raises visibility <a href="#geo-princeton">by 41%</a>: it was a lab result, and <a href="#c-seo-bench">C-SEO Bench</a> and a <a href="#geo-survey-2026">2026 survey of 45 studies</a> found such rewrites largely ineffective on live engines. The levers that reproduce are relevance &#8212; answering the question that was actually asked &#8212; and prominence &#8212; putting that answer early and plainly. Because <a href="#livecc">video LLMs learn from transcripts</a>, not pictures, what is said in a video matters far more than its production value.</p>
+  <p>Reddit's role is shifting. It was foundational training data through <a href="#reddit-webtext">WebText</a> and the <a href="#reddit-common-crawl">Common Crawl</a>, and Google and OpenAI signed <a href="#reddit-data-deals">data licensing deals with it in 2024</a>, which are reported to be under renegotiation. Its upvoted consensus, especially in "best X for Y" threads, still <a href="#reddit-community-consensus">shapes how models describe a category</a>. But Reddit's share of AI citations <a href="#conductor-reddit">fell about 50% between October 2025 and January 2026</a>, and in ChatGPT it is the <a href="#ahrefs-most-cited-chatgpt">#2 cited domain (6.2%), behind Wikipedia (10.1%)</a>. Genuine participation is worth it; over-investing in Reddit at the expense of other channels is not.</p>
+  <p>Google AI Overviews and standalone assistants draw on different sources, and AI Overviews now lean less on rankings. About <a href="#ahrefs-aio-top10-2026">38% of AI Overview citations</a> come from top-10 organic pages (Ahrefs, March 2026; 76% in its 2025 study, partly because of a change in how results are parsed), about <a href="#imc26-aio">30% of cited domains are not on page one</a>, and Google's results, AI Overviews and Gemini <a href="#sigir26-disrupts">share few sources</a>. Gemini 3 has <a href="#techcrunch-aio-mode">powered AI Overviews since January 2026</a>, with a handoff into AI Mode, which passed <a href="#google-io-2026">1 billion monthly users</a>; when an AI Overview appears, the top organic result loses <a href="#ahrefs-ctr-2026">about 58% of its clicks</a>. For standalone assistants, <a href="#ahrefs-ai-search-overlap">only 12% of cited URLs rank in Google's top 10</a>. Across 75,000 brands, <a href="#ahrefs-75k-2026">YouTube mentions (about 0.74) and branded web mentions (0.66-0.71)</a> correlate most strongly with AI visibility and Domain Rating far less (0.27-0.33) &#8212; correlation, not causation. Freshness matters too: AI assistants cite content <a href="#ahrefs-freshness">25.7% newer</a> than search results do, and <a href="#seer-recency-2026">how recently key commercial and comparison pages were updated</a> matters more than a site's average content age.</p>
+  <p>Crawlers now differ by purpose. OpenAI's <a href="#openai-crawlers">GPTBot collects training data only</a>; OAI-SearchBot fetches pages for ChatGPT search, and ChatGPT-User, which fetches pages a user asks about, may not follow robots.txt. Blocking training crawlers is a business choice, but blocking search crawlers hides a site from AI answers, and blocking Google's AI crawler is <a href="#sigir26-disrupts">associated with less AI Overview retrieval</a>. Since 15 September 2026 <a href="#cloudflare-2026">Cloudflare blocks AI crawlers by default</a> on new domains, so a site can be hidden from AI without its owner choosing it. Two popular tactics showed no effect in 2026 tests: <a href="#ahrefs-schema-2026">schema markup gave no meaningful citation lift</a>, though it still helps rich results and entity understanding, and <a href="#ahrefs-llmstxt">97% of llms.txt files got no requests</a> from AI crawlers.</p>
+  <p>These measurements come with caveats. AI answers are not reliably grounded: <a href="#imc26-aio">11% of AI Overview claims</a> were not supported by the sources they cited, and <a href="#ebu-bbc">45% of AI assistant answers about news</a> had at least one significant issue. Answers also vary from run to run: asked the same question repeatedly, AI tools returned the <a href="#sparktoro-inconsistency">same list of brands less than 1% of the time</a>, and in a small study one engine's <a href="#tannenbaum-engine">cited URLs turned over 67% from one day to the next</a>. Visibility is therefore best measured as a <a href="#schulte-measure">distribution over repeated runs</a>, per engine &#8212; how often a brand is mentioned, not where it ranks in a list &#8212; and the figures here describe associations, not causes. Citation still concentrates: the <a href="#news-citing-patterns">top 20 sources capture 28-67% of citations</a>, and LLMs attend most to the <a href="#lost-in-the-middle">beginning and end of their context</a>, so front-loading answers still pays.</p>
+  <p>Model updates add volatility. <a href="#resoneo-citation-collapse">When GPT-5.3 replaced GPT-4o</a> as ChatGPT's default, unique domains cited per response dropped 20.5% overnight &#8212; brands that had achieved dynamic visibility lost some of it without any change on their end. This reinforces the value of parametric visibility alongside dynamic visibility. Research into <a href="#dejan-brand-authority">LLM parametric memory</a> suggests that being associated with category leaders can matter more than raw mention frequency. Together, these findings inform LLM Optimizer's scoring frameworks across answer optimization, video authority, Reddit authority and search visibility, and the LLM Visibility Score weighs the LLM Test &#8212; the direct measure of what assistants actually answer &#8212; as heavily as answer optimization (25% each; video 20%, Reddit 15%, search 15%).</p>
 </div>
 </section>
 
@@ -206,13 +207,13 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <a id="geo-princeton" class="paper" href="https://arxiv.org/abs/2311.09735" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">GEO: Generative Engine Optimization</div>
   <div class="paper-venue">Princeton / KDD 2024</div>
-  <div class="paper-desc">Tested 9 content optimization strategies on 10,000 queries. Quotations (+41%), statistics (+33%), and fluency (+29%) are the most effective methods for improving LLM citation visibility.</div>
+  <div class="paper-desc">Tested 9 content rewriting strategies on 10,000 queries in a lab setting (2023). Quotations (+41%), statistics (+33%) and fluency (+29%) helped most there; 2025-2026 replications (C-SEO Bench, a survey of 45 studies) found these gains don't reliably hold on live engines.</div>
 </a>
 
 <a id="nanoknow" class="paper" href="https://arxiv.org/abs/2602.20122" target="_blank" rel="noopener noreferrer">
-  <div class="paper-title">NanoKnow: Probing LLM Knowledge by Linking Training Data to Answers</div>
-  <div class="paper-venue">2026</div>
-  <div class="paper-desc">Training data frequency more than doubles model accuracy. Even with oracle RAG, models score ~11 points higher on questions with answers in training data.</div>
+  <div class="paper-title">NanoKnow: How to Know What Your Language Model Knows</div>
+  <div class="paper-venue">SIGIR 2026 (Gu, Jedidi, Lin)</div>
+  <div class="paper-desc">Links benchmark questions to a fully open pre-training corpus. On small open models, closed-book accuracy depends strongly on how often the answer appears in the pre-training data; external evidence reduces that dependence, and models stay more accurate on answers they saw in training, so training and retrieval complement each other.</div>
 </a>
 
 <a id="geo-toronto" class="paper" href="https://arxiv.org/abs/2509.08919" target="_blank" rel="noopener noreferrer">
@@ -242,13 +243,13 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <a id="false-promise" class="paper" href="https://arxiv.org/abs/2410.22349" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">The False Promise of Factual and Verifiable Source-Cited Responses</div>
   <div class="paper-venue">2024</div>
-  <div class="paper-desc">Citation accuracy ranges 49-68% across answer engines. 23-32% of claims have no source backing. Perplexity generates one-sided answers 83.4% of the time.</div>
+  <div class="paper-desc">Citation accuracy ranged 49-68% across 2024 answer engines, and 23-32% of claims had no source backing. See IMC 2026 and EBU/BBC 2025 for current figures.</div>
 </a>
 
 <a id="reddit-webtext" class="paper" href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">Language Models are Unsupervised Multitask Learners</div>
   <div class="paper-venue">OpenAI, 2019 (Radford et al.)</div>
-  <div class="paper-desc">Introduced WebText, a dataset of 8 million Reddit posts with 3+ karma score, as the foundational training corpus for GPT-2. Demonstrated that Reddit's community curation mechanism (karma voting) effectively serves as a quality filter for large-scale language model training data.</div>
+  <div class="paper-desc">Introduced WebText, built from about 8 million pages linked from Reddit posts with 3+ karma, as GPT-2's training corpus. Reddit's community voting served as a quality filter for training data.</div>
 </a>
 
 <a id="reddit-common-crawl" class="paper" href="https://dl.acm.org/doi/10.1145/3630106.3659033" target="_blank" rel="noopener noreferrer">
@@ -260,7 +261,7 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <a id="reddit-data-deals" class="paper" href="https://www.reuters.com/technology/reddit-ai-content-licensing-deal-google-2024-02-22/" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">Reddit Data Licensing: Google and OpenAI Deals</div>
   <div class="paper-venue">Reuters / The Verge, 2024</div>
-  <div class="paper-desc">Google pays $60M/year and OpenAI $70M/year for Reddit data access. Reddit's API was locked down in 2023. Active litigation: Reddit v. Anthropic, Reddit v. Perplexity (scraping claims).</div>
+  <div class="paper-desc">Google and OpenAI signed paid data licensing deals with Reddit in 2024; they are reported to be under renegotiation. Reddit's API was locked down in 2023, and Reddit has sued AI companies over scraping.</div>
 </a>
 
 <a id="reddit-community-consensus" class="paper" href="https://www.adweek.com/media/youtube-reddit-ai-search-engine-citations" target="_blank" rel="noopener noreferrer">
@@ -272,7 +273,7 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <a id="ahrefs-aio-citations" class="paper" href="https://ahrefs.com/blog/search-rankings-ai-citations/" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">AI Overview Citations and Search Rankings</div>
   <div class="paper-venue">Ahrefs, 2025</div>
-  <div class="paper-desc">76% of AI Overview citations pull from top-10 organic pages. Median organic ranking for a cited URL is position 3. 86% of citations come from within the top 100 organic results.</div>
+  <div class="paper-desc">2025 study: 76% of AI Overview citations came from top-10 organic pages, with a median position of 3. Ahrefs' March 2026 update puts the top-10 share at about 38%.</div>
 </a>
 
 <a id="ahrefs-ai-search-overlap" class="paper" href="https://ahrefs.com/blog/ai-search-overlap/" target="_blank" rel="noopener noreferrer">
@@ -284,7 +285,7 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <a id="ahrefs-75k-brands" class="paper" href="https://ahrefs.com/blog/ai-brand-visibility-correlations/" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">AI Brand Visibility Correlations (75K Brands)</div>
   <div class="paper-venue">Ahrefs, 2025</div>
-  <div class="paper-desc">YouTube mentions (0.737) and web mentions (0.664) are the strongest correlators with AI visibility. Brand search volume (0.334) outperforms backlinks (0.37). Top 25% brands get 12x more AIO mentions.</div>
+  <div class="paper-desc">2025 study: YouTube mentions (0.737) and web mentions (0.664) correlated most strongly with AI visibility, brand search volume 0.334, backlinks far less. Top 25% brands got 12x more AIO mentions. Correlation, not causation.</div>
 </a>
 
 <a id="ahrefs-freshness" class="paper" href="https://ahrefs.com/blog/do-ai-assistants-prefer-to-cite-fresh-content/" target="_blank" rel="noopener noreferrer">
@@ -314,7 +315,151 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <a id="semrush-aio" class="paper" href="https://www.semrush.com/blog/semrush-ai-overviews-study/" target="_blank" rel="noopener noreferrer">
   <div class="paper-title">AI Overviews Study: 200,000 Keywords</div>
   <div class="paper-venue">Semrush, 2025</div>
-  <div class="paper-desc">Reddit (40.1%) and Wikipedia (26.3%) dominate AIO citations. 80% of AIO responses target informational queries. 82% appear for keywords with &lt;1,000 monthly searches.</div>
+  <div class="paper-desc">80% of AI Overview responses targeted informational queries, and 82% appeared for keywords with &lt;1,000 monthly searches (2025 data).</div>
+</a>
+
+<a id="ahrefs-aio-top10-2026" class="paper" href="https://ahrefs.com/blog/ai-overview-citations-top-10/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">AI Overview Citations and the Top 10 (2026 update)</div>
+  <div class="paper-venue">Ahrefs, March 2026 (vendor study, 863K keywords)</div>
+  <div class="paper-desc">About 38% of AI Overview citations now come from pages in the top 10 organic results, down from 76% in Ahrefs' 2025 study, partly because of a change in how results are parsed.</div>
+</a>
+
+<a id="imc26-aio" class="paper" href="https://arxiv.org/abs/2605.14021" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Measuring Google AI Overviews</div>
+  <div class="paper-venue">IMC 2026 (Xu, Iqbal, Montgomery)</div>
+  <div class="paper-desc">About 30% of the domains AI Overviews cite are not on the first page of search results, and 11% of AI Overview claims are not supported by the sources they cite.</div>
+</a>
+
+<a id="sigir26-disrupts" class="paper" href="https://arxiv.org/abs/2604.27790" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">How Generative AI Disrupts Search</div>
+  <div class="paper-venue">SIGIR 2026 (Grossman et al.)</div>
+  <div class="paper-desc">Google's results, AI Overviews and Gemini draw on largely different sources (Jaccard overlap below 0.2). Blocking Google's AI crawler is associated with less AI Overview retrieval.</div>
+</a>
+
+<a id="c-seo-bench" class="paper" href="https://arxiv.org/abs/2506.11097" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">C-SEO Bench</div>
+  <div class="paper-venue">NeurIPS 2025 Datasets &amp; Benchmarks (Puerto et al.)</div>
+  <div class="paper-desc">A benchmark of conversational search optimization methods: most content rewrites meant to raise AI citation, including the 2023 GEO techniques, were largely ineffective in realistic settings.</div>
+</a>
+
+<a id="geo-survey-2026" class="paper" href="https://arxiv.org/abs/2607.14035" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Critical Survey of GEO, 2023-2026</div>
+  <div class="paper-venue">arXiv, 2026 (Martinez)</div>
+  <div class="paper-desc">Reviews 45 GEO studies: the large 2023 gains, such as +41% from adding quotations, hold in lab settings but don't reliably carry over to live engines. Relevance to the query and prominence of the answer are the levers that reproduce.</div>
+</a>
+
+<a id="schulte-measure" class="paper" href="https://arxiv.org/abs/2604.07585" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Don't Measure Once</div>
+  <div class="paper-venue">arXiv, 2026 (Schulte, Bleeker, Kaufmann)</div>
+  <div class="paper-desc">AI answers vary between runs, so visibility should be measured as a distribution over repeated runs, not from a single answer.</div>
+</a>
+
+<a id="sparktoro-inconsistency" class="paper" href="https://sparktoro.com/blog/new-research-ais-are-highly-inconsistent-when-recommending-brands-or-products-marketers-should-take-care-when-tracking-ai-visibility/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">AIs Are Highly Inconsistent When Recommending Brands</div>
+  <div class="paper-venue">SparkToro / Gumshoe, January 2026</div>
+  <div class="paper-desc">Asked the same question repeatedly, AI tools returned the same list of brands less than 1% of the time. Track how often a brand appears, not where it ranks in a list.</div>
+</a>
+
+<a id="tannenbaum-engine" class="paper" href="https://arxiv.org/abs/2609.22655" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Scoring With the Engine: Retrieval Exposure, Cross-Engine Divergence, and the Limits of Engine-Agnostic GEO Scores</div>
+  <div class="paper-venue">arXiv, 2026 (Tannenbaum; small sample)</div>
+  <div class="paper-desc">Different engines cited almost entirely different URLs for the same prompt, and one engine's set of cited URLs turned over by 67% from one day to the next.</div>
+</a>
+
+<a id="ahrefs-75k-2026" class="paper" href="https://thenextweb.com/news/ahrefs-youtube-mentions-ai-visibility-brand-search" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">YouTube Mentions and AI Visibility (75K Brands, 2026)</div>
+  <div class="paper-venue">Ahrefs data via The Next Web, May 2026 (vendor data)</div>
+  <div class="paper-desc">YouTube mentions (about 0.737) and branded web mentions (0.66-0.71) correlate most strongly with AI visibility; Domain Rating correlates far less (0.27-0.33). These are correlations, not causes.</div>
+</a>
+
+<a id="ahrefs-most-cited-aio" class="paper" href="https://ahrefs.com/blog/most-cited-domains-ai-overviews/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Most-Cited Domains in AI Overviews</div>
+  <div class="paper-venue">Ahrefs, November 2026 (vendor data)</div>
+  <div class="paper-desc">YouTube is the most-cited domain in Google AI Overviews, at 24.5% of citations.</div>
+</a>
+
+<a id="ahrefs-most-cited-chatgpt" class="paper" href="https://ahrefs.com/blog/most-cited-domains-in-chatgpt/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Most-Cited Domains in ChatGPT</div>
+  <div class="paper-venue">Ahrefs, November 2026 (vendor data)</div>
+  <div class="paper-desc">Wikipedia is ChatGPT's most-cited domain (10.1%), with Reddit second (6.2%).</div>
+</a>
+
+<a id="digiday-youtube" class="paper" href="https://digiday.com/marketing/in-graphic-detail-llms-keep-citing-youtube-in-search-results/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">LLMs Keep Citing YouTube in Search Results</div>
+  <div class="paper-venue">Digiday, September 2026 (Meltwater and Scrunch data)</div>
+  <div class="paper-desc">YouTube is the most-cited domain across AI assistants in Meltwater's August 2026 data.</div>
+</a>
+
+<a id="conductor-reddit" class="paper" href="https://www.conductor.com/academy/reddit-ai-citation-decline/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Reddit's AI Citation Decline</div>
+  <div class="paper-venue">Conductor, 2026 (vendor data)</div>
+  <div class="paper-desc">Reddit's share of AI citations fell about 50% between October 2025 and January 2026.</div>
+</a>
+
+<a id="ahrefs-schema-2026" class="paper" href="https://ahrefs.com/blog/schema-ai-citations/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Schema Markup and AI Citations</div>
+  <div class="paper-venue">Ahrefs, May 2026 (controlled test, vendor)</div>
+  <div class="paper-desc">Adding schema markup gave no meaningful lift in AI citations. Schema still supports rich results and entity understanding.</div>
+</a>
+
+<a id="ahrefs-llmstxt" class="paper" href="https://ahrefs.com/blog/llmstxt-study/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">llms.txt Study</div>
+  <div class="paper-venue">Ahrefs, June 2026 (vendor)</div>
+  <div class="paper-desc">97% of llms.txt files received no requests from AI crawlers.</div>
+</a>
+
+<a id="seer-recency-2026" class="paper" href="https://www.seerinteractive.com/insights/study-content-recencys-impact-on-ai-visibility-in-2026" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Content Recency's Impact on AI Visibility in 2026</div>
+  <div class="paper-venue">Seer Interactive, 2026</div>
+  <div class="paper-desc">How recently key commercial and comparison pages were updated matters more for AI visibility than a site's average content age.</div>
+</a>
+
+<a id="semrush-chatgpt-2026" class="paper" href="https://www.semrush.com/blog/chatgpt-search-insights/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">ChatGPT Search Insights (Clickstream)</div>
+  <div class="paper-venue">Semrush, 2026 (vendor data)</div>
+  <div class="paper-desc">ChatGPT ran a web search for about 34.5% of US prompts (February 2026 data).</div>
+</a>
+
+<a id="openai-crawlers" class="paper" href="https://developers.openai.com/api/docs/bots" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">OpenAI Crawlers</div>
+  <div class="paper-venue">OpenAI documentation</div>
+  <div class="paper-desc">GPTBot collects training data; OAI-SearchBot indexes pages for ChatGPT search; ChatGPT-User fetches pages a user asks about and may not follow robots.txt.</div>
+</a>
+
+<a id="cloudflare-2026" class="paper" href="https://blog.cloudflare.com/content-independence-day-ai-options/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Content Independence Day: AI Options</div>
+  <div class="paper-venue">Cloudflare, July 2026</div>
+  <div class="paper-desc">Cloudflare blocks AI crawlers by default on new domains from 15 September 2026, so a site can block AI crawlers without its owner choosing to.</div>
+</a>
+
+<a id="techcrunch-aio-mode" class="paper" href="https://techcrunch.com/2026/01/27/google-now-lets-users-jump-from-ai-overviews-into-ai-mode-conversations" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Google Lets Users Jump from AI Overviews into AI Mode</div>
+  <div class="paper-venue">TechCrunch, January 2026</div>
+  <div class="paper-desc">From January 2026, AI Overviews run on Gemini 3 and let users continue into AI Mode conversations.</div>
+</a>
+
+<a id="google-io-2026" class="paper" href="https://blog.google/products-and-platforms/products/search/search-io-2026/" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">Search at I/O 2026</div>
+  <div class="paper-venue">Google, 2026 (self-reported)</div>
+  <div class="paper-desc">AI Mode passed 1 billion monthly users.</div>
+</a>
+
+<a id="ahrefs-ctr-2026" class="paper" href="https://ahrefs.com/blog/ai-overviews-reduce-clicks-update" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">AI Overviews Reduce Clicks (2026 update)</div>
+  <div class="paper-venue">Ahrefs, February 2026 (vendor)</div>
+  <div class="paper-desc">When an AI Overview appears, the top organic result's click-through rate falls by about 58%.</div>
+</a>
+
+<a id="ebu-bbc" class="paper" href="https://www.ebu.ch/research/open/report/news-integrity-in-ai-assistants" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">News Integrity in AI Assistants</div>
+  <div class="paper-venue">EBU / BBC, October 2025</div>
+  <div class="paper-desc">45% of AI assistant answers about news had at least one significant issue.</div>
+</a>
+
+<a id="metavert-state-2026" class="paper" href="https://metavert.io/state-of-ai-search-citations" target="_blank" rel="noopener noreferrer">
+  <div class="paper-title">State of AI Search Citations: Q4 2026</div>
+  <div class="paper-venue">Metavert, 2026</div>
+  <div class="paper-desc">A synthesis of the 2026 AI citation research behind these scoring frameworks.</div>
 </a>
 
 <a id="resoneo-citation-collapse" class="paper" href="https://think.resoneo.com/chatgpt/5.3-5.4/" target="_blank" rel="noopener noreferrer">
@@ -323,11 +468,11 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
   <div class="paper-desc">27,000 responses across 400 prompts over 14 weeks. After GPT-5.3 launched, unique domains cited per response dropped 20.5% (19.1 &#8594; 15.2) and unique URLs dropped 21.0% (24.1 &#8594; 19.1). Formalizes the distinction between parametric visibility (training data knowledge) and dynamic visibility (real-time web retrieval).</div>
 </a>
 
-<a id="dejan-brand-authority" class="paper" href="https://think.resoneo.com/chatgpt/5.3-5.4/" target="_blank" rel="noopener noreferrer">
+<div id="dejan-brand-authority" class="paper">
   <div class="paper-title">Brand Authority Index: Network Centrality in LLM Parametric Memory</div>
-  <div class="paper-venue">Dejan AI / Resoneo, 2026</div>
-  <div class="paper-desc">Queried Gemini 200,000 times across ~20 million brand mentions, building a 2.9 million-node directed association graph. Found that network centrality &#8212; being densely associated with high-authority brands &#8212; outweighs raw mention frequency for parametric visibility. A brand with zero spontaneous recall ranked highest due to dense intersections with authority brands.</div>
-</a>
+  <div class="paper-venue">Dejan AI, 2026</div>
+  <div class="paper-desc">Queried Gemini 200,000 times across ~20 million brand mentions, building a 2.9 million-node association graph. Found that being densely associated with high-authority brands can matter more than raw mention frequency for parametric visibility.</div>
+</div>
 </section>
 
 <!-- Answer Optimization Framework -->
@@ -340,26 +485,26 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Content Authority</span><span class="fw-weight">30%</span></div>
-  <div class="fw-source">Source: GEO (Princeton/KDD 2024)</div>
-  <div class="fw-desc">Measures the presence of quotations from authoritative sources (+41% visibility), statistical evidence (+33%), source citations (+28%), fluency (+29%), and technical terminology (+19%). Penalizes keyword stuffing (-9%).</div>
+  <div class="fw-source">Source: C-SEO Bench (NeurIPS 2025) + GEO survey (2026) + GEO (Princeton/KDD 2024)</div>
+  <div class="fw-desc">Query fit and extractable evidence: does the page answer the question that was asked, directly and early, with specific, sourced facts (figures, named sources, dates) that a model can lift into its answer? 2025-2026 replications found that relevance and prominence move AI citation reliably, while rewriting tricks such as adding quotations (+41% in a 2023 lab study) don't hold up on live engines. Penalizes keyword stuffing.</div>
 </div>
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Structural Optimization</span><span class="fw-weight">20%</span></div>
-  <div class="fw-source">Source: Lost in the Middle (TACL 2024) + GEO (Toronto 2025)</div>
-  <div class="fw-desc">Evaluates answer prominence (front-loaded vs. buried), content conciseness, machine-readable structure (Schema.org, tables, comparison formats), and justification language that explains "why" rather than just "what."</div>
+  <div class="fw-source">Source: Lost in the Middle (TACL 2024) + GEO (Toronto 2025) + Ahrefs schema study (2026)</div>
+  <div class="fw-desc">Evaluates answer prominence (front-loaded vs. buried), content conciseness, extractable structure (tables, lists, comparison formats, clear headings), and justification language that explains "why" rather than just "what." Schema.org markup helps rich results and entity understanding but showed no measurable AI citation lift in 2026, so it counts little.</div>
 </div>
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Source Authority</span><span class="fw-weight">30%</span></div>
-  <div class="fw-source">Source: GEO (Toronto 2025)</div>
-  <div class="fw-desc">Assesses third-party coverage and earned media presence. AI search engines cite earned media 72-92% of the time. Evaluates cross-engine consistency since different AI providers cite substantially different sources (similarity only 0.11-0.58).</div>
+  <div class="fw-source">Source: GEO (Toronto 2025) + Ahrefs most-cited domains (2026)</div>
+  <div class="fw-desc">Assesses third-party coverage and earned media presence, counting YouTube videos, Wikipedia, review sites and "best X" comparison lists as third-party coverage. AI search engines cite earned media 72-92% of the time; YouTube is the most-cited domain in AI Overviews and Wikipedia in ChatGPT. Evaluates cross-engine consistency since different AI providers cite substantially different sources.</div>
 </div>
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Knowledge Persistence</span><span class="fw-weight">20%</span></div>
-  <div class="fw-source">Source: NanoKnow (2026)</div>
-  <div class="fw-desc">Measures how deeply information is embedded in model training data. Answer frequency more than doubles accuracy. Content that is both in training data AND retrievable at inference compounds advantage by ~11 percentage points. Clear, educational writing outperforms natural text by 19+ points.</div>
+  <div class="fw-source">Source: NanoKnow (SIGIR 2026)</div>
+  <div class="fw-desc">Estimates how likely the information is to be known to models from training. On small open models, accuracy depends strongly on how often an answer appears in the training data, and retrieved evidence and training knowledge complement each other. Clear, self-contained answer passages that are widely repeated across quality sources score highest.</div>
 </div>
 </section>
 
@@ -373,8 +518,8 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Transcript Authority</span><span class="fw-weight">30%</span></div>
-  <div class="fw-source">Source: LiveCC (CVPR 2025) + GEO (Princeton 2024)</div>
-  <div class="fw-desc">Transcript quality is the dominant signal for LLM visibility. Evaluates keyword alignment, quotability (standalone citable statements get +41% visibility per GEO), information density, and caption availability. Videos without captions are effectively invisible to LLMs.</div>
+  <div class="fw-source">Source: LiveCC (CVPR 2025) + Ahrefs 75K Brands (2026)</div>
+  <div class="fw-desc">Transcript quality is the dominant signal for LLM visibility. Evaluates keyword alignment, quotability (clear, standalone statements a model can lift into an answer), information density, and caption availability. Videos without captions are effectively invisible to LLMs. YouTube mentions correlate strongly with AI visibility (about 0.74 across 75,000 brands; correlation, not causation).</div>
 </div>
 
 <div class="fw-card">
@@ -391,8 +536,8 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Brand Narrative Quality</span><span class="fw-weight">20%</span></div>
-  <div class="fw-source">Source: False Promise of Source-Cited Responses (2024) + Lost in the Middle (2024)</div>
-  <div class="fw-desc">Evaluates sentiment, mention context and position (early mentions get priority per U-shaped attention), extractability (clear mentions are less likely to be misrepresented given 49-68% citation accuracy), and narrative coherence. Includes a confidence discount reflecting known citation inaccuracy rates.</div>
+  <div class="fw-source">Source: IMC 2026 + EBU/BBC (2025) + Lost in the Middle (2024)</div>
+  <div class="fw-desc">Evaluates sentiment, mention context and position (early mentions get priority per U-shaped attention), extractability (clear mentions are less likely to be misrepresented: 11% of AI Overview claims aren't supported by their cited sources), and narrative coherence. Includes a confidence discount reflecting how often AI answers misstate their sources.</div>
 </div>
 </section>
 
@@ -424,8 +569,8 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Training Signal Strength</span><span class="fw-weight">25%</span></div>
-  <div class="fw-source">Source: NanoKnow (2026) + Reddit Data Licensing (2024)</div>
-  <div class="fw-desc">Likelihood that Reddit discussions will influence LLM training. High-upvote threads in authoritative subreddits with deep comment engagement create the strongest training signals. Reddit data is actively licensed to OpenAI and Google.</div>
+  <div class="fw-source">Source: NanoKnow (SIGIR 2026) + Reddit Data Licensing (2024) + Conductor (2026)</div>
+  <div class="fw-desc">Likelihood that Reddit discussions will influence LLM training. High-upvote threads in authoritative subreddits with deep comment engagement create the strongest training signals. Google and OpenAI licensed Reddit data in 2024 (deals reported to be under renegotiation), but Reddit's share of AI citations fell about 50% from late 2025 to early 2026, so it is one channel among several.</div>
 </div>
 </section>
 
@@ -439,26 +584,26 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">AI Overview Readiness</span><span class="fw-weight">25%</span></div>
-  <div class="fw-source">Source: Ahrefs AIO Citations Study (2025) + Semrush AIO Study (2025)</div>
-  <div class="fw-desc">76% of AI Overview citations pull from top-10 organic pages. Evaluates organic ranking presence, structured data (Schema.org, JSON-LD), content format alignment with AIO-preferred informational queries, and answer prominence (front-loaded concise answers). AIOs favor long-tail keywords &#8212; 82% appear for terms with &lt;1,000 monthly searches.</div>
+  <div class="fw-source">Source: Ahrefs AIO Citations (2026) + IMC 2026 + Ahrefs schema study (2026)</div>
+  <div class="fw-desc">About 38% of AI Overview citations now come from top-10 organic pages (Ahrefs, March 2026; 76% in 2025), and about 30% of cited domains aren't on page one. Evaluates organic presence, content format alignment with AIO-preferred informational queries, and answer prominence (front-loaded concise answers). Structured data counts little: schema showed no measurable AI citation lift in 2026 tests. AIOs favor long-tail keywords: 82% appear for terms with &lt;1,000 monthly searches.</div>
 </div>
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Crawl Accessibility</span><span class="fw-weight">20%</span></div>
-  <div class="fw-source">Source: Cloudflare AI Crawler Report (2025) + Consent in Crisis (ACM FAccT 2024)</div>
-  <div class="fw-desc">GPTBot grew 305% YoY with a crawl-to-referral ratio of 1,700:1. Evaluates robots.txt policy for AI crawlers (GPTBot, ClaudeBot, PerplexityBot and their SearchBot variants), sitemap completeness, and render accessibility. Blocking training bots while allowing search bots is a valid strategy; blocking everything eliminates AI visibility.</div>
+  <div class="fw-source">Source: OpenAI crawler docs + Cloudflare (2026) + SIGIR 2026</div>
+  <div class="fw-desc">Crawlers differ by purpose: GPTBot and ClaudeBot collect training data; OAI-SearchBot, Claude-SearchBot, PerplexityBot, Googlebot and Bingbot fetch pages for AI answers and search; ChatGPT-User fetches pages for a user and may not follow robots.txt. Blocking training crawlers is a business choice and costs no points; blocking a major search crawler caps the score. Cloudflare blocks AI crawlers by default on new domains since 15 September 2026, so check its setting. Also evaluates sitemap completeness and render accessibility.</div>
 </div>
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Brand Search Momentum</span><span class="fw-weight">30%</span></div>
-  <div class="fw-source">Source: Ahrefs 75K-Brand Study (2025) + Google Trends API (2025)</div>
-  <div class="fw-desc">Brand search volume has a 0.334 correlation with AI citation frequency &#8212; but web mentions (0.664) and YouTube mentions (0.737) are stronger. Winner-takes-all: top 25% brands average 169 AIO mentions vs. 14 for the 50th-75th percentile. Evaluates brand search trends, entity recognition, and competitive positioning.</div>
+  <div class="fw-source">Source: Ahrefs 75K-Brand Study (2025, 2026 update) + Google Trends</div>
+  <div class="fw-desc">Across 75,000 brands, YouTube mentions (about 0.74) and branded web mentions (0.66-0.71) correlate most strongly with AI visibility, more than Domain Rating (0.27-0.33) or brand search volume (0.334). Correlation, not causation. Winner-takes-all: top 25% brands average 169 AIO mentions vs. 14 for the 50th-75th percentile. Evaluates brand search trends, web mentions, entity recognition, and competitive positioning.</div>
 </div>
 
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Content Freshness</span><span class="fw-weight">25%</span></div>
-  <div class="fw-source">Source: Ahrefs 17M Citations Study (2025) + Seer Interactive (2025) + arXiv Recency Bias (2025)</div>
-  <div class="fw-desc">AI assistants cite content 25.7% newer than traditional search. 65% of AI bot hits target content &lt;1 year old. Freshness signals can move items up to 95 ranking positions in LLM reranking. Evaluates content age, update frequency, freshness signals (dates, last-modified), and content decay risk. Note: Google AIOs counter-trend, preferring older authoritative content.</div>
+  <div class="fw-source">Source: Ahrefs 17M Citations Study (2025) + Seer Interactive (2026) + arXiv Recency Bias (2025)</div>
+  <div class="fw-desc">AI assistants cite content 25.7% newer than traditional search, and how recently key commercial and comparison pages (product, pricing, comparisons) were updated matters more than the site's average content age, so those pages weigh most. Freshness signals can move items up to 95 ranking positions in LLM reranking. Evaluates update dates of key pages, update frequency, freshness signals (dates, last-modified), and content decay risk. Note: Google AIOs counter-trend, preferring older authoritative content.</div>
 </div>
 
 <div class="fw-card">
@@ -475,34 +620,28 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
   Key Research Findings
 </h3>
 
-<a class="finding" href="#geo-princeton">
-  <div class="finding-title">Quotations are the single most effective optimization method</div>
-  <div class="finding-detail">Adding quotes from authoritative sources improves LLM visibility by 41%, more than any other technique tested on 10,000 queries. Statistics (+33%) and fluency (+29%) follow.</div>
-  <div class="finding-source">GEO, Princeton/KDD 2024</div>
-</a>
-
-<a class="finding" href="#geo-princeton">
-  <div class="finding-title">Lower-ranked sites benefit disproportionately</div>
-  <div class="finding-detail">Rank-5 sites saw +115% visibility improvement from citing sources, while rank-1 sites saw -30%. Generative engines can be more democratic than traditional search for well-optimized content.</div>
-  <div class="finding-source">GEO, Princeton/KDD 2024</div>
+<a class="finding" href="#c-seo-bench">
+  <div class="finding-title">Relevance and prominence beat rewriting tricks</div>
+  <div class="finding-detail">The 2023 GEO lab study found adding quotations (+41%) or statistics (+33%) raised visibility. C-SEO Bench (2025) and a 2026 survey of 45 studies found such rewrites largely don't hold up on live engines; answering the actual question, early and plainly, is what reproduces.</div>
+  <div class="finding-source">C-SEO Bench 2025 + GEO survey 2026</div>
 </a>
 
 <a class="finding" href="#geo-toronto">
-  <div class="finding-title">AI search overwhelmingly favors earned media</div>
-  <div class="finding-detail">AI search engines cite independent third-party sources 72-92% of the time, compared to only 18-27% for brand-owned content and virtually 0% for social content.</div>
-  <div class="finding-source">GEO, Toronto 2025</div>
+  <div class="finding-title">AI search favors earned media</div>
+  <div class="finding-detail">AI search engines cite independent third-party sources 72-92% of the time, compared to 18-27% for brand-owned content. Third-party coverage includes video: YouTube is the most-cited domain in AI Overviews.</div>
+  <div class="finding-source">GEO, Toronto 2025 + Ahrefs 2026</div>
 </a>
 
 <a class="finding" href="#nanoknow">
-  <div class="finding-title">Training data frequency more than doubles accuracy</div>
-  <div class="finding-detail">Models are more than twice as accurate on questions whose answers appear frequently (51+ documents) in training data vs. rarely (1-5 documents). Being in training data AND retrievable compounds advantage.</div>
-  <div class="finding-source">NanoKnow, 2026</div>
+  <div class="finding-title">Training data and retrieval work together</div>
+  <div class="finding-detail">On small open models, accuracy depends strongly on how often an answer appears in the pre-training data; external evidence narrows the gap, and models stay more accurate on answers they saw in training.</div>
+  <div class="finding-source">NanoKnow, SIGIR 2026</div>
 </a>
 
-<a class="finding" href="#youtube-citations">
-  <div class="finding-title">YouTube is the #1 social citation source for LLMs</div>
-  <div class="finding-detail">YouTube's share of social citations doubled from 18.9% to 39.2% in just 5 months. It generates 18x more AI citations than Instagram and 50x more than TikTok. Views and subscriber counts do not predict AI citation.</div>
-  <div class="finding-source">Adweek / Bluefish / Emberos / Goodie AI, 2025</div>
+<a class="finding" href="#ahrefs-most-cited-aio">
+  <div class="finding-title">YouTube is the most-cited domain in AI answers</div>
+  <div class="finding-detail">YouTube accounts for 24.5% of AI Overview citations (Ahrefs, November 2026) and leads across AI assistants (Meltwater, August 2026). In 2025 data, views and subscriber counts did not predict AI citation.</div>
+  <div class="finding-source">Ahrefs + Digiday / Meltwater, 2026</div>
 </a>
 
 <a class="finding" href="#livecc">
@@ -517,58 +656,76 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
   <div class="finding-source">Lost in the Middle, TACL 2024</div>
 </a>
 
-<a class="finding" href="#false-promise">
-  <div class="finding-title">AI citation accuracy is surprisingly poor</div>
-  <div class="finding-detail">Perplexity achieves only 49% citation accuracy; You.com 68%; BingChat 66%. 23-32% of relevant statements have no source backing. Systems display more sources than they actually use.</div>
-  <div class="finding-source">False Promise of Source-Cited Responses, 2024</div>
+<a class="finding" href="#imc26-aio">
+  <div class="finding-title">AI answers aren't reliably grounded</div>
+  <div class="finding-detail">11% of AI Overview claims weren't supported by the sources they cited (IMC 2026), and 45% of AI assistant answers about news had at least one significant issue (EBU/BBC, 2025).</div>
+  <div class="finding-source">IMC 2026 + EBU/BBC 2025</div>
 </a>
 
-<a class="finding" href="#reddit-webtext">
-  <div class="finding-title">Reddit is the #2 social citation source and foundational training data</div>
-  <div class="finding-detail">Reddit accounts for 10-40% of AI social citations depending on platform/timeframe. WebText (GPT-2 training) was built from 8M Reddit posts with 3+ karma. Reddit remains pervasive in Common Crawl and is actively licensed to Google ($60M/yr) and OpenAI ($70M/yr).</div>
-  <div class="finding-source">Multiple sources, 2024-2025</div>
+<a class="finding" href="#conductor-reddit">
+  <div class="finding-title">Reddit's share of AI citations is falling</div>
+  <div class="finding-detail">Reddit's share of AI citations fell about 50% between October 2025 and January 2026. In ChatGPT it is the #2 cited domain (6.2%) behind Wikipedia (10.1%). It remains part of training data (WebText, Common Crawl), and its 2024 licensing deals with Google and OpenAI are reported to be under renegotiation.</div>
+  <div class="finding-source">Conductor + Ahrefs, 2026</div>
 </a>
 
 <a class="finding" href="#reddit-community-consensus">
   <div class="finding-title">Community consensus creates unique credibility signals</div>
-  <div class="finding-detail">Upvoted comment threads, especially "best X for Y" recommendation discussions, create multi-user validation that LLMs weight heavily. This multi-user signal cannot be replicated by single-author content.</div>
+  <div class="finding-detail">Upvoted comment threads, especially "best X for Y" recommendation discussions, create multi-user validation that shapes how models describe a category. This multi-user signal cannot be replicated by single-author content.</div>
   <div class="finding-source">Bluefish Labs / Emberos, 2025</div>
 </a>
 
-<a class="finding" href="#ahrefs-aio-citations">
-  <div class="finding-title">AI Overviews strongly favor top-ranked pages</div>
-  <div class="finding-detail">76% of Google AI Overview citations come from top-10 organic pages, with median cited position at rank 3. But standalone LLMs (ChatGPT, Claude, Gemini) show only 12% overlap &#8212; they cite fundamentally different sources.</div>
-  <div class="finding-source">Ahrefs, 2025</div>
+<a class="finding" href="#ahrefs-aio-top10-2026">
+  <div class="finding-title">AI Overviews rely less on top-ranked pages</div>
+  <div class="finding-detail">About 38% of AI Overview citations come from top-10 organic pages (Ahrefs, March 2026; 76% in 2025). About 30% of cited domains aren't on page one (IMC 2026), and Google, AI Overviews and Gemini share few sources (SIGIR 2026). Standalone assistants overlap with Google's top 10 only 12% of the time.</div>
+  <div class="finding-source">Ahrefs + IMC + SIGIR, 2026</div>
 </a>
 
-<a class="finding" href="#ahrefs-75k-brands">
-  <div class="finding-title">Web mentions outperform backlinks for AI visibility</div>
-  <div class="finding-detail">Brand web mentions (0.664 correlation) and YouTube mentions (0.737) are far stronger predictors of AI citation than backlinks (0.37). Top 25% brands by web mentions get 12x more AI Overview mentions than the 50-75th percentile.</div>
-  <div class="finding-source">Ahrefs 75K Brands Study, 2025</div>
+<a class="finding" href="#ahrefs-75k-2026">
+  <div class="finding-title">Brand mentions correlate most with AI visibility</div>
+  <div class="finding-detail">Across 75,000 brands, YouTube mentions (about 0.74) and branded web mentions (0.66-0.71) correlate most strongly with AI visibility, Domain Rating far less (0.27-0.33). These are correlations, not causes.</div>
+  <div class="finding-source">Ahrefs 75K Brands, 2026</div>
 </a>
 
-<a class="finding" href="#ahrefs-freshness">
-  <div class="finding-title">AI assistants strongly prefer fresh content</div>
-  <div class="finding-detail">Content cited by AI assistants is 25.7% newer on average than traditional search results. 65% of AI bot crawl hits target content less than 1 year old. Freshness signals can shift LLM ranking positions by up to 95 places.</div>
-  <div class="finding-source">Ahrefs (17M citations) + arXiv, 2025</div>
+<a class="finding" href="#seer-recency-2026">
+  <div class="finding-title">AI assistants prefer fresh content</div>
+  <div class="finding-detail">Content cited by AI assistants is 25.7% newer on average than traditional search results, and how recently key commercial and comparison pages were updated matters more than a site's average content age.</div>
+  <div class="finding-source">Ahrefs (17M citations) + Seer Interactive, 2026</div>
 </a>
 
-<a class="finding" href="#cloudflare-ai-crawlers">
-  <div class="finding-title">AI crawlers are growing explosively</div>
-  <div class="finding-detail">GPTBot grew 305% YoY, with OpenAI's crawl-to-referral ratio at 1,700:1. Each major AI company now runs 3 separate bots (training, indexing, user-fetch). Blocking training bots while allowing search bots is a valid strategy.</div>
-  <div class="finding-source">Cloudflare, 2025</div>
+<a class="finding" href="#openai-crawlers">
+  <div class="finding-title">Crawler purpose matters</div>
+  <div class="finding-detail">GPTBot and ClaudeBot collect training data; OAI-SearchBot powers ChatGPT search; ChatGPT-User fetches pages for a user and may not follow robots.txt. Blocking training crawlers is a business choice; blocking search crawlers hides a site. Cloudflare has blocked AI crawlers by default on new domains since 15 September 2026.</div>
+  <div class="finding-source">OpenAI docs + Cloudflare, 2026</div>
+</a>
+
+<a class="finding" href="#ahrefs-schema-2026">
+  <div class="finding-title">Schema and llms.txt don't drive AI citations</div>
+  <div class="finding-detail">In a controlled test, schema markup gave no meaningful lift in AI citations (Ahrefs, May 2026), and 97% of llms.txt files got no requests from AI crawlers (Ahrefs, June 2026). Schema still helps rich results and entity understanding.</div>
+  <div class="finding-source">Ahrefs, 2026</div>
+</a>
+
+<a class="finding" href="#sparktoro-inconsistency">
+  <div class="finding-title">AI answers vary from run to run</div>
+  <div class="finding-detail">Asked the same question repeatedly, AI tools returned the same list of brands less than 1% of the time (SparkToro/Gumshoe, January 2026), and in a small study one engine's cited URLs turned over 67% from one day to the next. Measure visibility as how often a brand appears over repeated runs, per engine.</div>
+  <div class="finding-source">SparkToro + Schulte et al. + Tannenbaum, 2026</div>
+</a>
+
+<a class="finding" href="#ahrefs-ctr-2026">
+  <div class="finding-title">AI Overviews and AI Mode change where clicks go</div>
+  <div class="finding-detail">When an AI Overview appears, the top organic result's click-through rate falls about 58% (Ahrefs, February 2026). AI Mode passed 1 billion monthly users, and ChatGPT searched the web for about 34.5% of US prompts.</div>
+  <div class="finding-source">Ahrefs + Google + Semrush, 2026</div>
 </a>
 
 <a class="finding" href="#resoneo-citation-collapse">
   <div class="finding-title">Model updates can collapse citation volume overnight</div>
-  <div class="finding-detail">When GPT-5.3 replaced GPT-4o as the default model, unique domains cited per response dropped 20.5% and unique URLs dropped 21%. The study formalizes two distinct visibility types: parametric (stable, from training data) and dynamic (volatile, from real-time retrieval) &#8212; and shows that model updates can sharply reduce the latter.</div>
+  <div class="finding-detail">When GPT-5.3 replaced GPT-4o as the default model, unique domains cited per response dropped 20.5% and unique URLs dropped 21%. The study formalizes two visibility types: parametric (from training data) and dynamic (from real-time retrieval), and shows that model updates can sharply reduce the latter.</div>
   <div class="finding-source">Resoneo, 2026</div>
 </a>
 
 <a class="finding" href="#dejan-brand-authority">
-  <div class="finding-title">Brand network centrality outweighs raw mention frequency</div>
-  <div class="finding-detail">A 200,000-query study of LLM parametric memory found that brands densely associated with high-authority peers rank higher than brands with more raw mentions. A brand with zero spontaneous recall ranked #1 because of its network position among luxury category leaders. Being mentioned alongside the right brands matters more than being mentioned often.</div>
-  <div class="finding-source">Dejan AI / Resoneo, 2026</div>
+  <div class="finding-title">Association with category leaders can outweigh mention frequency</div>
+  <div class="finding-detail">A 200,000-query study of LLM parametric memory found that brands densely associated with high-authority peers can rank higher than brands with more raw mentions. Being mentioned alongside the right brands can matter more than being mentioned often.</div>
+  <div class="finding-source">Dejan AI, 2026</div>
 </a>
 </section>
 

@@ -2265,26 +2265,26 @@ Relevant page URLs from this site:%s
 
 Your analysis must evaluate four dimensions, each scored 0-100:
 
-## Dimension 1: Content Authority (30%% weight)
+## Dimension 1: Content Authority (30%% weight) — query fit and extractable evidence
 Visit the page URL(s) above and evaluate:
-- Does the content include quotations from authoritative sources? (Research shows +41%% visibility)
-- Does it include specific statistics and data points? (+33%% visibility)
-- Does it cite external references/sources inline? (+28%% visibility)
-- Is the writing fluent and well-structured? (+29%% visibility)
-- Does it use appropriate technical/domain terminology? (+19%% visibility)
-- Is there keyword stuffing or marketing fluff? (-9%% visibility — harmful)
+- Does the page answer this exact question directly and early, in words a model could lift into its answer?
+- Does it back the answer with specific, sourced facts (figures, named sources, dates, prices, specifications) rather than general claims?
+- Does it cite its sources inline, so the evidence can be checked?
+- Is the writing clear and precise, using the field's own terminology correctly?
+- Is there keyword stuffing or marketing fluff? (Penalize it: it hurts in generative engines.)
+Rewriting tricks such as adding quotations or statistics for their own sake showed large gains in a 2023 lab study but don't reliably hold up on live engines in 2025-2026 replications; relevance to the question and prominence of the answer are what reproduce. Score evidence that answers the question, not decoration.
 
 ## Dimension 2: Structural Optimization (20%% weight)
 - Is the answer to the question front-loaded (prominent) or buried deep in the page?
 - Is the content concise and focused, or sprawling and padded?
-- Are there machine-readable structures (Schema.org, comparison tables, FAQ blocks, bulleted lists)?
+- Are there extractable structures (comparison tables, FAQ blocks, bulleted lists, clear headings)? Schema.org markup helps rich results and entity understanding but showed no measurable AI citation lift in 2026 tests, so note it without scoring it as a citation driver.
 - Does the content explain "why" not just "what" — providing justification language?
 
 ## Dimension 3: Source Authority (30%% weight)
 Search the web for third-party coverage:
-- Is this site mentioned by independent review sites, industry publications, or analysts?
-- Is this earned media coverage (independent third parties) rather than brand-owned or social content?
-- AI search engines cite earned media 72-92%% of the time and virtually ignore social content.
+- Is this site or brand covered by independent sources for this topic: review sites, industry publications, analysts, "best X" and comparison lists, Wikipedia, and YouTube videos from other creators? Count all of these as third-party coverage.
+- Is this earned media coverage (independent third parties) rather than brand-owned content?
+- AI search engines cite independent third-party sources 72-92%% of the time. YouTube is the most-cited domain in Google AI Overviews and Wikipedia the most-cited in ChatGPT; Reddit discussions count too, though Reddit's share of AI citations fell sharply in 2026.
 - How does this site's authority compare to other sites answering the same question?
 
 ## Dimension 4: Knowledge Persistence (20%% weight)
@@ -2292,12 +2292,14 @@ Search the web to assess:
 - How widely does this answer/information appear across the web? (Higher frequency = better)
 - Is the content written in a clear, educational, didactic style?
 - Would this content be effective as RAG context — clear, self-contained answer passages?
-- Information widely repeated across high-quality sources is far more likely encoded in LLM weights.
+- Information widely repeated across high-quality sources is more likely to be known to models from training; models answer more accurately when an answer appeared often in their training data, and retrieved evidence and training knowledge complement each other.
 
 Also identify:
 - 3-5 competing websites that answer this same question (search for the question)
 - For each competitor: estimate their overall score and note their key strengths
 - 3-5 prioritized recommendations (high/medium/low) for improving the site's LLM visibility for this question
+
+Recommendations must follow current evidence: answer buyers' real questions directly and early, with sourced facts; build third-party presence where AI answers draw from (Wikipedia, comparison and review sites, YouTube creators, and genuine Reddit participation without over-investing); refresh key product, pricing and comparison pages at least yearly with honest update dates. Don't recommend llms.txt, schema markup as a way to win AI citations, or adding quotations or statistics for a visibility percentage.
 
 Return your analysis as JSON in exactly this format (no markdown code fences, just raw JSON):
 {
@@ -5774,7 +5776,7 @@ func buildPillar1Prompt(p videoContextParams) string {
 	sb.WriteString(fmt.Sprintf(`
 Analyze the own-channel videos above for TRANSCRIPT AUTHORITY — how well the brand's spoken content signals expertise to LLMs.
 
-LLMs consume transcripts, not video. Quotation-ready content gets +41%%%% visibility; statistics +33%%%%. U-shaped attention: beginning and end of transcripts get disproportionate weight.
+LLMs consume transcripts, not video. Clear, standalone statements that answer real questions with specific facts are what models can lift into an answer. U-shaped attention: beginning and end of transcripts get disproportionate weight. YouTube is the most-cited domain in Google AI Overviews, and YouTube mentions correlate strongly with AI visibility (correlation, not causation).
 
 Evaluate:
 - Keyword alignment: target search terms in spoken words?
@@ -5868,7 +5870,7 @@ func buildPillar4Prompt(p videoContextParams) string {
 	sb.WriteString(fmt.Sprintf(`
 Analyze the third-party video digests for BRAND NARRATIVE QUALITY — how %s is framed when it appears in third-party content.
 
-Perplexity generates one-sided answers 83.4%%%% of the time — negative patterns get amplified. Citation accuracy is only 49-68%%%%.
+AI answers often misstate their sources — 11%% of AI Overview claims weren't supported by the sources they cited (IMC 2026), and 45%% of AI assistant answers about news had at least one significant issue (EBU/BBC 2025) — so negative patterns can get amplified.
 
 Evaluate:
 - For brand mentions: sentiment, mention_context (recommendation/tutorial/comparison/complaint/passing), mention_position (early/middle/late), extractability (high/medium/low)
@@ -5903,7 +5905,7 @@ PILLAR RESULTS:
 TASK:
 1. Calculate overall_score = transcript_authority.score * 0.30 + topical_dominance.score * 0.25 + citation_network.score * 0.25 + brand_narrative.score * 0.20
 2. Write executive_summary: 2-3 paragraph strategic overview of the brand's video LLM authority position, drawing on all 4 pillars.
-3. Write confidence_note: explicit statement about citation accuracy limitations (49-68%%) and what they mean for this brand.
+3. Write confidence_note: explicit statement about the limits of AI citation accuracy (in 2026, 11%% of AI Overview claims weren't supported by their sources) and that AI answers vary from run to run, and what they mean for this brand.
 4. Provide 5-12 structured recommendations spanning all 4 dimensions.
 
 Return ONLY valid JSON:
@@ -6341,7 +6343,7 @@ func handleVideoAnalyze(mongoDB *MongoDB, encKey []byte, fallbackKey string, saa
 				float64(result.CitationNetwork.Score)*0.25 +
 				float64(result.BrandNarrative.Score)*0.20)
 			result.ExecutiveSummary = "Synthesis unavailable — pillar scores computed independently."
-			result.ConfidenceNote = "Citation accuracy in AI search is 49-68%. Results should be interpreted with caution."
+			result.ConfidenceNote = "AI answers don't always reflect their sources accurately (in 2026, 11% of AI Overview claims weren't supported by the sources they cited), and they vary from run to run. Interpret these results with caution."
 		} else {
 			if synthModel != "" {
 				usedModel = synthModel
@@ -7175,13 +7177,16 @@ func buildRedditAuthorityPrompt(domain string, threads []RedditThread, competito
 	sb.WriteString(`
 ## Research Context
 
-Reddit is the #2 source for LLM-generated citations, behind only YouTube. Reddit threads—especially highly-upvoted recommendation threads—strongly influence how LLMs answer questions about products, services, and brands. Key dynamics:
+Reddit threads—especially highly-upvoted recommendation threads—shape how LLMs answer questions about products, services, and brands, though Reddit's weight is shifting. Key dynamics:
 
-1. **Training Data Weight**: Reddit was foundational in LLM training (WebText, Common Crawl). Google pays $60M/year and OpenAI $70M/year for Reddit data access.
-2. **Multi-User Validation**: Upvotes and comment consensus create credibility signals that single-author content cannot match.
-3. **Recommendation Threads**: "Best X for Y" threads are among the most influential for LLM responses to comparison queries.
-4. **Community Authority**: Mentions in authoritative, topic-specific subreddits carry more weight than general subreddits.
-5. **Recency Signal**: Recent discussions with active engagement signal ongoing relevance.
+1. **Training Data Weight**: Reddit was foundational in LLM training (WebText, Common Crawl), and Google and OpenAI licensed its data in 2024 (deals reported to be under renegotiation).
+2. **Citation Share**: Reddit is the #2 most-cited domain in ChatGPT, behind Wikipedia, but its share of AI citations fell about 50% between October 2025 and January 2026. Treat it as one channel among several, not the dominant one.
+3. **Multi-User Validation**: Upvotes and comment consensus create credibility signals that single-author content cannot match.
+4. **Recommendation Threads**: "Best X for Y" threads are among the most influential for LLM responses to comparison queries.
+5. **Community Authority**: Mentions in authoritative, topic-specific subreddits carry more weight than general subreddits.
+6. **Recency Signal**: Recent discussions with active engagement signal ongoing relevance.
+
+Recommendations should favor genuine participation (answering questions, being present where the category is discussed) over campaigns, and shouldn't urge over-investing in Reddit at the expense of Wikipedia, review sites and YouTube.
 
 ## Task
 
@@ -7454,25 +7459,28 @@ func buildSearchVisibilityPrompt(domain string, brandInfo BrandContextInfo, comp
 
 Search visibility affects AI citation through two distinct pathways:
 
-**Google AI Overviews (strong SEO correlation):**
-- 76%% of AI Overview citations pull from top-10 organic pages (Ahrefs, 1.9M citations study)
-- Being cited in an AIO increases CTR by 80%%+ for that site
-- Reddit (40.1%%) and Wikipedia (26.3%%) dominate AIO citations
+**Google AI Overviews (moderate and falling SEO correlation):**
+- About 38%% of AI Overview citations now come from top-10 organic pages (Ahrefs, March 2026; 76%% in its 2025 study, partly a parsing change), and about 30%% of AIO-cited domains aren't on page one (IMC 2026)
+- Google's results, AI Overviews and Gemini share few sources (Jaccard overlap below 0.2, SIGIR 2026); AI Overviews run on Gemini 3 and hand off into AI Mode
+- YouTube is the most-cited domain in AI Overviews (24.5%%, Ahrefs, November 2026)
+- When an AI Overview appears, the top organic result's click-through rate falls about 58%% (Ahrefs, 2026)
 - 82%% of AIOs appear for keywords with <1,000 monthly searches (long-tail dominated)
+- Schema markup showed no measurable AI citation lift in a 2026 controlled test, and 97%% of llms.txt files got no AI crawler requests
 
 **Standalone LLMs (weak SEO correlation):**
 - Only 12%% of ChatGPT/Claude/Gemini cited URLs rank in Google's top 10
-- Brand web mentions (0.664 correlation) and YouTube mentions (0.737) are stronger predictors than backlinks (0.37)
+- In ChatGPT, Wikipedia is the most-cited domain (10.1%%) and Reddit second (6.2%%); ChatGPT searched the web for about 34.5%% of US prompts in early 2026
+- Across 75,000 brands, YouTube mentions (about 0.74) and branded web mentions (0.66-0.71) correlate most strongly with AI visibility; Domain Rating far less (0.27-0.33). These are correlations, not causes.
 - 28%% of ChatGPT's top-cited pages have zero Google organic visibility
 
 **Crawl Accessibility:**
-- GPTBot grew 305%% YoY; OpenAI's crawl-to-referral ratio is 1,700:1
-- OpenAI, Anthropic, and Perplexity each now run 3 separate bots: training, indexing, and user-fetch
-- Blocking training bots while allowing search bots is a valid strategy; blocking everything hurts AI visibility
-- ~21%% of top-1000 sites block GPTBot
+- Crawlers differ by purpose: GPTBot (OpenAI) and ClaudeBot (Anthropic) collect training data; OAI-SearchBot powers ChatGPT search; ChatGPT-User fetches pages a user asks about and may not follow robots.txt
+- Blocking training crawlers is a business choice; blocking search crawlers hides the site from AI answers. Blocking Google-Extended is associated with less AI Overview retrieval (SIGIR 2026)
+- Since 15 September 2026 Cloudflare blocks AI crawlers by default on new domains, so a site can be blocked without its owner choosing it
 
 **Content Freshness:**
 - AI assistants cite content that is 25.7%% newer than traditional Google results (Ahrefs, 17M citations)
+- How recently key commercial and comparison pages (product, pricing, comparisons) were updated matters more for AI visibility than the site's average content age (Seer Interactive, 2026)
 - 65%% of AI bot crawl hits target content published within the past year
 - ChatGPT, Perplexity strongly favor recent content; Google AIOs actually prefer older authoritative content
 
@@ -7486,11 +7494,11 @@ Using the web_search tool, conduct a comprehensive search visibility analysis of
 
 1. **Visit the site's robots.txt** — search for "%s robots.txt" and/or try to access it directly. Identify which crawlers are explicitly allowed or disallowed. Separate the crawlers that fetch pages for AI answers and search (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot, Googlebot, Bingbot) from the training crawlers (GPTBot, ClaudeBot) and Google-Extended (Gemini training and grounding). Blocking training crawlers is a business choice, not a visibility problem; blocking search crawlers hides the site from AI answers. Note whether the site is behind Cloudflare, whose default AI-bot blocking can block crawlers the robots.txt allows.
 
-2. **Check for structured data** — Visit key pages of the site and check for Schema.org markup (JSON-LD), OpenGraph tags, structured content (tables, FAQ sections, comparison formats).
+2. **Check for structured data** — Visit key pages of the site and check for Schema.org markup (JSON-LD), OpenGraph tags, structured content (tables, FAQ sections, comparison formats). Schema helps rich results and entity understanding, not AI citation, so it counts little.
 
 3. **Assess organic search presence** — Search for the brand name and key product/service terms. How prominently does the site appear in search results? How well does it rank for relevant informational queries?
 
-4. **Evaluate content freshness** — Check publication dates, last-updated indicators, blog/content publishing frequency. Are key pages being regularly updated?
+4. **Evaluate content freshness** — Check the last-updated dates of the key commercial and comparison pages (product, pricing, comparisons) first; they count more than the site's average content age. Then check publication dates, last-updated indicators and publishing frequency elsewhere.
 
 5. **Assess brand search momentum** — Search for the brand name to gauge how well-known it is. Look for web mentions, reviews, news coverage. Compare against any competitors.
 
@@ -7592,7 +7600,8 @@ Return your analysis as a JSON object with this exact structure:
 IMPORTANT:
 - The overall_score should be a weighted average: %s
 - Provide 3-6 evidence items per pillar with specific, verifiable findings
-- Include 4-8 prioritized recommendations
+- Include 4-8 prioritized recommendations, following current evidence: allow the crawlers that fetch pages for AI answers (blocking training crawlers is the owner's business choice) and check Cloudflare's AI bot setting; refresh key product, pricing and comparison pages at least yearly with honest update dates; build third-party presence (Wikipedia, review and comparison sites, YouTube creators). Don't recommend llms.txt, and recommend schema only for rich results and entity understanding, not as an AI citation lever
+- In the confidence_note, mention that AI answers vary from run to run, so visibility is best judged by how often the brand appears over repeated runs, per engine
 - Be specific and cite actual findings from your searches
 - Return ONLY the JSON object, no markdown fencing or explanation
 `, weightLine))
