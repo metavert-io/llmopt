@@ -55,7 +55,10 @@ type Competitor struct {
 // research rubric without re-running it (guidance_refresh.go): scores are
 // unchanged, advice the research no longer supports was rewritten or removed.
 type GuidanceRevision struct {
-	Rubric    int       `json:"rubric" bson:"rubric"`
+	Rubric int `json:"rubric" bson:"rubric"`
+	// Pass is the version of the reviser's instructions it was updated with
+	// (guidancePass); a result revised with older instructions is revised again.
+	Pass      int       `json:"pass,omitempty" bson:"pass,omitempty"`
 	RevisedAt time.Time `json:"revised_at" bson:"revisedAt"`
 	Changes   []string  `json:"changes,omitempty" bson:"changes,omitempty"`
 }
