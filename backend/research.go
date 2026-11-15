@@ -438,7 +438,7 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <p class="section-desc">Search visibility analysis evaluates how search-related signals affect whether AI systems will discover, index, and cite your content &#8212; bridging traditional SEO signals with AI citation dynamics. When Brand Intelligence provides category data, a fifth pillar (Category Discovery) measures whether people searching your category &#8212; without knowing your brand &#8212; can find you.</p>
 
 <div class="fw-card">
-  <div class="fw-header"><span class="fw-name">AI Overview Readiness</span><span class="fw-weight">30%</span></div>
+  <div class="fw-header"><span class="fw-name">AI Overview Readiness</span><span class="fw-weight">25%</span></div>
   <div class="fw-source">Source: Ahrefs AIO Citations Study (2025) + Semrush AIO Study (2025)</div>
   <div class="fw-desc">76% of AI Overview citations pull from top-10 organic pages. Evaluates organic ranking presence, structured data (Schema.org, JSON-LD), content format alignment with AIO-preferred informational queries, and answer prominence (front-loaded concise answers). AIOs favor long-tail keywords &#8212; 82% appear for terms with &lt;1,000 monthly searches.</div>
 </div>
@@ -450,7 +450,7 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 </div>
 
 <div class="fw-card">
-  <div class="fw-header"><span class="fw-name">Brand Search Momentum</span><span class="fw-weight">25%</span></div>
+  <div class="fw-header"><span class="fw-name">Brand Search Momentum</span><span class="fw-weight">30%</span></div>
   <div class="fw-source">Source: Ahrefs 75K-Brand Study (2025) + Google Trends API (2025)</div>
   <div class="fw-desc">Brand search volume has a 0.334 correlation with AI citation frequency &#8212; but web mentions (0.664) and YouTube mentions (0.737) are stronger. Winner-takes-all: top 25% brands average 169 AIO mentions vs. 14 for the 50th-75th percentile. Evaluates brand search trends, entity recognition, and competitive positioning.</div>
 </div>
@@ -464,7 +464,7 @@ footer .inner{max-width:56rem;margin:0 auto;padding:0 1rem;display:flex;flex-dir
 <div class="fw-card">
   <div class="fw-header"><span class="fw-name">Category Discovery</span><span class="fw-weight">20% (when categories available)</span></div>
   <div class="fw-source">Source: Brand Intelligence categories + target queries</div>
-  <div class="fw-desc">When Brand Intelligence provides category keywords and intent queries, a fifth pillar evaluates how visible the brand is in category-level searches &#8212; queries where users search the category without knowing the brand. This measures discovery potential: does the brand appear when someone searches "best [category] tools" or "[use case] solutions"? Sub-metrics include category visibility, intent coverage, competitor gap, and discovery potential. Weights rebalance to 25/15/20/20/20 across all five pillars.</div>
+  <div class="fw-desc">When Brand Intelligence provides category keywords and intent queries, a fifth pillar evaluates how visible the brand is in category-level searches &#8212; queries where users search the category without knowing the brand. This measures discovery potential: does the brand appear when someone searches "best [category] tools" or "[use case] solutions"? Sub-metrics include category visibility, intent coverage, competitor gap, and discovery potential. Weights rebalance to 20/15/25/20/20 across all five pillars.</div>
 </div>
 </section>
 

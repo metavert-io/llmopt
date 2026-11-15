@@ -593,6 +593,7 @@ interface SearchVisibilityResult {
   executive_summary: string
   confidence_note: string
   recommendations: { action: string; priority: string; expected_impact: string; dimension: string }[]
+  rubric_version?: number
 }
 
 interface SearchAnalysis {
@@ -817,6 +818,7 @@ export default function App() {
   // Domain summary state
   const [activeSummary, setActiveSummary] = useState<DomainSummary | null>(null)
   const [activeSummaryStale, setActiveSummaryStale] = useState(false)
+  const [activeSummaryRescored, setActiveSummaryRescored] = useState(false)
   const [generatingSummary, setGeneratingSummary] = useState(false)
   const [summaryMessages, setSummaryMessages] = useState<string[]>([])
 
@@ -1237,11 +1239,13 @@ export default function App() {
         const data = await res.json()
         setActiveSummary(data.summary)
         setActiveSummaryStale(data.stale)
+        setActiveSummaryRescored(!!data.rescored)
         return
       }
     } catch { /* ignore */ }
     setActiveSummary(null)
     setActiveSummaryStale(false)
+    setActiveSummaryRescored(false)
   }, [])
 
   const deleteAnalysis = useCallback(async (id: string) => {
@@ -4608,7 +4612,7 @@ curl -X PATCH \\
             <div className="space-y-4">
               {[
                 {
-                  name: 'AI Overview Readiness', weight: '30%',
+                  name: 'AI Overview Readiness', weight: '25%',
                   source: 'Ahrefs AIO Citations Study (2025) + Semrush AIO Study (2025)',
                   desc: '76% of AI Overview citations pull from top-10 organic pages. Evaluates organic ranking presence, structured data (Schema.org, JSON-LD), content format alignment with AIO-preferred informational queries, and answer prominence (front-loaded concise answers). AIOs favor long-tail keywords — 82% appear for terms with <1,000 monthly searches.',
                 },
@@ -4618,7 +4622,7 @@ curl -X PATCH \\
                   desc: 'GPTBot grew 305% YoY with a crawl-to-referral ratio of 1,700:1. Evaluates robots.txt policy for AI crawlers (GPTBot, ClaudeBot, PerplexityBot and their SearchBot variants), sitemap completeness, and render accessibility. Blocking training bots while allowing search bots is a valid strategy; blocking everything eliminates AI visibility.',
                 },
                 {
-                  name: 'Brand Search Momentum', weight: '25%',
+                  name: 'Brand Search Momentum', weight: '30%',
                   source: 'Ahrefs 75K-Brand Study (2025) + Google Trends API (2025)',
                   desc: 'Brand search volume has a 0.334 correlation with AI citation frequency — but web mentions (0.664) and YouTube mentions (0.737) are stronger. Winner-takes-all: top 25% brands average 169 AIO mentions vs. 14 for the 50th-75th percentile. Evaluates brand search trends, entity recognition, and competitive positioning.',
                 },
@@ -4630,7 +4634,7 @@ curl -X PATCH \\
                 {
                   name: 'Category Discovery', weight: '20% (when categories available)',
                   source: 'Brand Intelligence categories + target queries',
-                  desc: 'When Brand Intelligence provides category keywords and intent queries, a fifth pillar evaluates how visible the brand is in category-level searches — queries where users search the category without knowing the brand. This measures discovery potential: does the brand appear when someone searches "best [category] tools" or "[use case] solutions"? Sub-metrics include category visibility, intent coverage, competitor gap, and discovery potential. Weights rebalance to 25/15/20/20/20 across all five pillars.',
+                  desc: 'When Brand Intelligence provides category keywords and intent queries, a fifth pillar evaluates how visible the brand is in category-level searches — queries where users search the category without knowing the brand. This measures discovery potential: does the brand appear when someone searches "best [category] tools" or "[use case] solutions"? Sub-metrics include category visibility, intent coverage, competitor gap, and discovery potential. Weights rebalance to 20/15/25/20/20 across all five pillars.',
                 },
               ].map((pillar, i) => (
                 <div key={i} className="bg-dark-900/50 border border-dark-800 rounded-xl p-5">
@@ -5280,7 +5284,7 @@ curl -X PATCH \\
                       </div>
                       <div>
                         <h3 className="text-white font-semibold text-lg">LLM Visibility Score</h3>
-                        <p className="text-dark-400 text-sm">{scoreLabel(visibilityScore.score)} &middot; Based on {visibilityScore.available} of {visibilityScore.components.length} dimensions</p>
+                        <p className="text-dark-400 text-sm">{scoreLabel(visibilityScore.score)} &middot; Based on {visibilityScore.available} of {visibilityScore.components.length} dimensions &middot; <span title="The LLM Test (what assistants actually answer) and answer optimization weigh most; Reddit less, as its share of AI citations fell in 2026. Applied to every saved analysis.">2026 weights</span></p>
                       </div>
                     </div>
                     <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
@@ -5458,7 +5462,9 @@ curl -X PATCH \\
                       {/* Stale banner */}
                       {activeSummaryStale && !readOnly && (
                         <div className="flex items-center justify-between bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 mb-4">
-                          <span className="text-amber-400 text-xs">New or updated reports available since this summary was generated.</span>
+                          <span className="text-amber-400 text-xs">{activeSummaryRescored
+                            ? 'Scoring was updated for 2026 research after this summary was written. Regenerate to use the new scores.'
+                            : 'New or updated reports available since this summary was generated.'}</span>
                           <button
                             onClick={() => generateSummary(selectedDomain)}
                             className="text-xs px-3 py-1.5 bg-amber-500/20 border border-amber-500/30 text-amber-400 rounded-lg hover:bg-amber-500/30 transition-all cursor-pointer whitespace-nowrap ml-3"
@@ -10025,6 +10031,17 @@ curl -X PATCH \\
                     <div className={`text-dark-300 text-sm leading-relaxed whitespace-pre-line ${!expandedSections.has('search-summary') ? 'line-clamp-3' : ''}`}>{r.executive_summary}</div>
                   </div>
 
+                  {/* Scored before the 2026 rubric: re-weighted now, criteria on re-run */}
+                  {(r.rubric_version ?? 0) < 2 && (
+                    <div className="bg-primary-500/5 border border-primary-500/20 rounded-xl px-5 py-3">
+                      <p className="text-dark-400 text-xs leading-relaxed">
+                        <span className="text-primary-400 font-medium">Re-weighted for 2026 research:</span>{' '}
+                        These scores use the 2026 weights. Brand Momentum now counts most, schema markup counts little, and blocking AI training crawlers no longer costs points.
+                        {!readOnly && ' Re-run the analysis to also check the crawlers that fetch pages for ChatGPT, Claude and Bing.'}
+                      </p>
+                    </div>
+                  )}
+
                   {/* Brand Recognition vs Discovery callout */}
                   {r.category_discovery && (
                     <div className="bg-cyan-500/5 border border-cyan-500/20 rounded-xl px-5 py-3">
@@ -10039,9 +10056,9 @@ curl -X PATCH \\
                   {/* Pillar Scores */}
                   <div className={`grid grid-cols-2 ${r.category_discovery ? 'sm:grid-cols-5' : 'sm:grid-cols-4'} gap-3`}>
                     {[
-                      { label: 'AI Overview Readiness', score: r.aio_readiness.score, weight: r.category_discovery ? '25%' : '30%' },
+                      { label: 'AI Overview Readiness', score: r.aio_readiness.score, weight: r.category_discovery ? '20%' : '25%' },
                       { label: 'Crawl Accessibility', score: r.crawl_accessibility.score, weight: r.category_discovery ? '15%' : '20%' },
-                      { label: 'Brand Momentum', score: r.brand_momentum.score, weight: r.category_discovery ? '20%' : '25%' },
+                      { label: 'Brand Momentum', score: r.brand_momentum.score, weight: r.category_discovery ? '25%' : '30%' },
                       { label: 'Content Freshness', score: r.content_freshness.score, weight: r.category_discovery ? '20%' : '25%' },
                       ...(r.category_discovery ? [{ label: 'Category Discovery', score: r.category_discovery.score, weight: '20%' }] : []),
                     ].map((p, i) => (

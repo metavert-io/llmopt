@@ -27,9 +27,10 @@ import (
 //go:embed reporttpl/report.html reporttpl/fonts/*.woff2
 var reportTplFS embed.FS
 
-// reportEngineVersion marks PDFs made by this engine, so cached PDFs from an
-// older engine are regenerated (see ReportFingerprint.Engine).
-const reportEngineVersion = "html-1"
+// reportEngineVersion marks PDFs made by this engine and scoring rubric, so
+// cached PDFs from an older engine or older weights are regenerated (see
+// ReportFingerprint.Engine). Bump the number with any template or weight change.
+const reportEngineVersion = "html-2"
 
 // reportWeakestShown is how many of the weakest optimized questions get a full card.
 const reportWeakestShown = 10

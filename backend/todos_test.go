@@ -305,9 +305,10 @@ func TestIsSummaryStale_NotStale(t *testing.T) {
 	// Summary generated after all data - should not be stale
 	generatedAt := time.Now()
 	summary := DomainSummary{
-		TenantID:    "test-tenant",
-		Domain:      "stale-test.com",
-		GeneratedAt: generatedAt,
+		RubricVersion: scoringRubricVersion,
+		TenantID:      "test-tenant",
+		Domain:        "stale-test.com",
+		GeneratedAt:   generatedAt,
 	}
 
 	stale, _ := isSummaryStale(bgCtx, db, ctx, "stale-test.com", summary)
@@ -324,9 +325,10 @@ func TestIsSummaryStale_NewOptimization(t *testing.T) {
 	// Old summary
 	oldTime := time.Now().Add(-time.Hour)
 	summary := DomainSummary{
-		TenantID:    "test-tenant",
-		Domain:      "stale-opt.com",
-		GeneratedAt: oldTime,
+		RubricVersion: scoringRubricVersion,
+		TenantID:      "test-tenant",
+		Domain:        "stale-opt.com",
+		GeneratedAt:   oldTime,
 	}
 
 	// Insert an optimization newer than the summary
@@ -352,9 +354,10 @@ func TestIsSummaryStale_NewAnalysis(t *testing.T) {
 
 	oldTime := time.Now().Add(-time.Hour)
 	summary := DomainSummary{
-		TenantID:    "test-tenant",
-		Domain:      "stale-an.com",
-		GeneratedAt: oldTime,
+		RubricVersion: scoringRubricVersion,
+		TenantID:      "test-tenant",
+		Domain:        "stale-an.com",
+		GeneratedAt:   oldTime,
 	}
 
 	// Insert an analysis newer than the summary

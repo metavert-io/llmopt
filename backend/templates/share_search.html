@@ -51,22 +51,22 @@
     <h2>Pillar Scores</h2>
     <div class="grid-2">
       <div class="card-padded">
-        <div class="fw-header"><span class="fw-name">AI Overview Readiness</span><span class="pill">30%</span></div>
+        <div class="fw-header"><span class="fw-name">AI Overview Readiness</span><span class="pill">{{if .CategoryDiscovery}}20%{{else}}25%{{end}}</span></div>
         <div class="score-sm score-{{scoreClass .AIOReadiness.Score}}" style="margin:.5rem 0">{{.AIOReadiness.Score}}</div>
         {{if .AIOReadiness.Evidence}}<ul class="evidence">{{range .AIOReadiness.Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}
       </div>
       <div class="card-padded">
-        <div class="fw-header"><span class="fw-name">Crawl Accessibility</span><span class="pill">20%</span></div>
+        <div class="fw-header"><span class="fw-name">Crawl Accessibility</span><span class="pill">{{if .CategoryDiscovery}}15%{{else}}20%{{end}}</span></div>
         <div class="score-sm score-{{scoreClass .CrawlAccess.Score}}" style="margin:.5rem 0">{{.CrawlAccess.Score}}</div>
         {{if .CrawlAccess.Evidence}}<ul class="evidence">{{range .CrawlAccess.Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}
       </div>
       <div class="card-padded">
-        <div class="fw-header"><span class="fw-name">Brand Search Momentum</span><span class="pill">25%</span></div>
+        <div class="fw-header"><span class="fw-name">Brand Search Momentum</span><span class="pill">{{if .CategoryDiscovery}}25%{{else}}30%{{end}}</span></div>
         <div class="score-sm score-{{scoreClass .BrandMomentum.Score}}" style="margin:.5rem 0">{{.BrandMomentum.Score}}</div>
         {{if .BrandMomentum.Evidence}}<ul class="evidence">{{range .BrandMomentum.Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}
       </div>
       <div class="card-padded">
-        <div class="fw-header"><span class="fw-name">Content Freshness</span><span class="pill">25%</span></div>
+        <div class="fw-header"><span class="fw-name">Content Freshness</span><span class="pill">{{if .CategoryDiscovery}}20%{{else}}25%{{end}}</span></div>
         <div class="score-sm score-{{scoreClass .ContentFreshness.Score}}" style="margin:.5rem 0">{{.ContentFreshness.Score}}</div>
         {{if .ContentFreshness.Evidence}}<ul class="evidence">{{range .ContentFreshness.Evidence}}<li>{{.}}</li>{{end}}</ul>{{end}}
       </div>

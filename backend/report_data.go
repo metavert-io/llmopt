@@ -62,73 +62,10 @@ func weighVisibility(components []visibilityComponent) visibilityScore {
 }
 
 // computeVisibilityScore loads each dimension's latest score for the domain in
-// the request's tenant.
+// the request's tenant (the same tenant scoping as everywhere else, so a server
+// without SaaS sign-in finds its data too). Weights: see scoring.go.
 func computeVisibilityScore(ctx context.Context, mongoDB *MongoDB, domain string, reqCtx context.Context) visibilityScore {
-	components := []visibilityComponent{
-		{Name: "Optimization", Weight: 0.30},
-		{Name: "Video Authority", Weight: 0.20},
-		{Name: "Reddit Authority", Weight: 0.20},
-		{Name: "Search Visibility", Weight: 0.15},
-		{Name: "LLM Test", Weight: 0.15},
-	}
-
-	// 1. Optimization: average over all of the domain's optimizations
-	cursor, err := mongoDB.Optimizations().Find(ctx,
-		tenantFilter(reqCtx, bson.D{{Key: "domain", Value: domain}}),
-		options.Find().SetProjection(bson.D{{Key: "result.overallScore", Value: 1}}),
-	)
-	if err == nil {
-		var opts []struct {
-			Result struct {
-				OverallScore int `bson:"overallScore"`
-			} `bson:"result"`
-		}
-		if cursor.All(ctx, &opts) == nil && len(opts) > 0 {
-			total := 0
-			for _, o := range opts {
-				total += o.Result.OverallScore
-			}
-			components[0].Score = total / len(opts)
-			components[0].Available = true
-		}
-	}
-
-	type scored struct {
-		Result *struct {
-			OverallScore int `bson:"overallScore"`
-		} `bson:"result"`
-	}
-	byLatest := options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "result.overallScore", Value: 1}})
-	// The same tenant scoping as everywhere else (tenantFilter), so a server
-	// without SaaS sign-in finds its data too.
-	own := tenantFilter(reqCtx, bson.D{{Key: "domain", Value: domain}})
-
-	// 2. Video authority (latest)
-	var va scored
-	if mongoDB.VideoAnalyses().FindOne(ctx, own, byLatest).Decode(&va) == nil && va.Result != nil {
-		components[1].Score, components[1].Available = va.Result.OverallScore, true
-	}
-	// 3. Reddit authority (latest)
-	var ra scored
-	if mongoDB.RedditAnalyses().FindOne(ctx, own, byLatest).Decode(&ra) == nil && ra.Result != nil {
-		components[2].Score, components[2].Available = ra.Result.OverallScore, true
-	}
-	// 4. Search visibility (latest)
-	var sa scored
-	if mongoDB.SearchAnalyses().FindOne(ctx, own, byLatest).Decode(&sa) == nil && sa.Result != nil {
-		components[3].Score, components[3].Available = sa.Result.OverallScore, true
-	}
-	// 5. LLM Test (latest, not a competitor test)
-	var lt struct {
-		OverallScore int `bson:"overallScore"`
-	}
-	if mongoDB.LLMTests().FindOne(ctx,
-		append(own, bson.E{Key: "competitorOf", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}}),
-		options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "overallScore", Value: 1}}),
-	).Decode(&lt) == nil {
-		components[4].Score, components[4].Available = lt.OverallScore, true
-	}
-	return weighVisibility(components)
+	return visibilityScoreFor(ctx, mongoDB, tenantFilter(reqCtx, bson.D{{Key: "domain", Value: domain}}))
 }
 
 // loadReportData loads everything the report needs. progress (may be nil) is
