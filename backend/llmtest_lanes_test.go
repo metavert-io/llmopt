@@ -120,7 +120,7 @@ func TestLLMTest_RateLimitPausesProvider(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		calls++
-		if calls <= 2 {
+		if calls <= testCallsPerProvider { // every lane's first call hits the limit
 			if firstLimit.IsZero() {
 				firstLimit = time.Now()
 			}
@@ -223,7 +223,7 @@ func TestLLMTest_EndlessRateLimitGivesUp(t *testing.T) {
 	if result == nil {
 		t.Fatalf("no result:\n%s", statusMessages(events))
 	}
-	if c := atomic.LoadInt32(&calls); c > 12 {
+	if c := atomic.LoadInt32(&calls); c > 6*testCallsPerProvider { // about six per lane before giving up
 		t.Errorf("Gemini was called %d times after its pause budget ran out", c)
 	}
 	if msgs := statusMessages(events); !strings.Contains(msgs, "Gemini can't be used: its API stayed rate-limited") {

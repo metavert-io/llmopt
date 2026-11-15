@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -438,5 +439,66 @@ func TestSummarizeTest_SearchStagesAndOwnSite(t *testing.T) {
 	}
 	if d := sum.diagnosis; d == nil || d.Answered != 4 || d.Stages != want {
 		t.Errorf("diagnosis = %+v", sum.diagnosis)
+	}
+}
+
+// A provider too slow for the answer deadline doesn't sink the test: its
+// unfinished calls count as unanswered and the rest is scored and saved.
+func TestLLMTest_SlowProviderHitsAnswerDeadline(t *testing.T) {
+	db := testMongoDB(t)
+	insertTestTenantKey(t, db, "anthropic")
+	insertTestTenantKey(t, db, "gemini")
+	orig := llmTestTimes
+	llmTestTimes = func(int) (time.Duration, time.Duration) { return 20 * time.Second, 1500 * time.Millisecond }
+	t.Cleanup(func() { llmTestTimes = orig })
+
+	fast := newTestProvider()
+	fast.id, fast.name = "anthropic", "Anthropic"
+	fast.CallFn = func(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+		if isEvalPrompt(prompt) {
+			return gradeByResponseID(prompt), nil
+		}
+		return "Example Health is a good option.", nil
+	}
+	var slowCalls int32
+	slow := newTestProvider()
+	slow.id, slow.name = "gemini", "Gemini"
+	slow.CallFn = func(ctx context.Context, apiKey, model, prompt string, maxTokens int) (string, error) {
+		if atomic.AddInt32(&slowCalls, 1) <= 2 {
+			return "Example Health exists.", nil
+		}
+		<-ctx.Done() // hangs until the answer deadline
+		return "", ctx.Err()
+	}
+	withTestProviders(t, fast, slow)
+
+	events, result := runLLMTestRequest(t, db, true, map[string]any{
+		"domain": "example.com", "providers": []string{"anthropic", "gemini"}, "queries": testQueries(6), "runs": 2,
+	})
+	if result == nil {
+		t.Fatalf("expected the test to finish; events:\n%s", statusMessages(events))
+	}
+	if !strings.Contains(statusMessages(events), "Time's up for answers") {
+		t.Errorf("expected a time's-up note; events:\n%s", statusMessages(events))
+	}
+	var g *LLMTestSummary
+	for i := range result.ProviderSummaries {
+		if result.ProviderSummaries[i].ProviderID == "gemini" {
+			g = &result.ProviderSummaries[i]
+		}
+	}
+	if g == nil || g.Answered != 2 || g.Failed != 10 {
+		t.Fatalf("gemini summary = %+v", g)
+	}
+	outOfTime := 0
+	for _, qr := range result.Results {
+		for _, pr := range qr.ProviderResults {
+			if pr.ProviderID == "gemini" && strings.Contains(pr.Response, "ran out of time") {
+				outOfTime++
+			}
+		}
+	}
+	if outOfTime != 10 {
+		t.Errorf("%d answers marked as out of time, want 10", outOfTime)
 	}
 }

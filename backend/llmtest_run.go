@@ -23,7 +23,29 @@ const maxModelSwitches = 6
 // testCallsPerProvider is how many queries one provider answers at a time.
 // Each provider has its own lanes, so a slow or rate-limited provider holds up
 // only its own queries, and a key with a small per-minute quota isn't flooded.
-const testCallsPerProvider = 2
+const testCallsPerProvider = 3
+
+// errTestOutOfTime marks a call the test's answer deadline cut short or never
+// made, so a slow provider can't sink the whole test.
+var errTestOutOfTime = errors.New("the test ran out of time before this call finished")
+
+// llmTestTimes gives a test its total time and the part of it answers may use
+// (the rest is kept for grading): 15 minutes per pass over the queries, at
+// most an hour, with a fifth (3-10 minutes) for grading.
+var llmTestTimes = func(passes int) (total, answers time.Duration) {
+	total = time.Duration(passes) * 15 * time.Minute
+	if total > time.Hour {
+		total = time.Hour
+	}
+	reserve := total / 5
+	if reserve < 3*time.Minute {
+		reserve = 3 * time.Minute
+	}
+	if reserve > 10*time.Minute {
+		reserve = 10 * time.Minute
+	}
+	return total, total - reserve
+}
 
 // maxRateLimitRetries is how many times one query is retried while the
 // provider asks the run to slow down (quota per minute); other retryable
