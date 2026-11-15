@@ -64,8 +64,14 @@ Return ONLY a JSON object with exactly the structure of the input plus "changes"
 %s:
 %s`
 
-// guidanceRefreshBatch is how many optimizations one revision call handles.
-const guidanceRefreshBatch = 4
+// guidanceRefreshBatch is how many optimizations one revision call handles,
+// and guidanceRefreshParallel how many calls run at once. The reviser echoes
+// every list it's given, so one optimization per call keeps each reply well
+// inside the providers' per-call time limit (four per call ran past it).
+const (
+	guidanceRefreshBatch    = 1
+	guidanceRefreshParallel = 4
+)
 
 type dimGuidance struct {
 	Evidence     []string `json:"evidence"`
@@ -315,12 +321,12 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 		mu.Unlock()
 	}
 
-	// Optimizations, a few per call, three calls at a time.
+	// Optimizations, guidanceRefreshBatch per call, guidanceRefreshParallel at a time.
 	var batches [][]Optimization
 	for i := 0; i < len(work.opts); i += guidanceRefreshBatch {
 		batches = append(batches, work.opts[i:min(i+guidanceRefreshBatch, len(work.opts))])
 	}
-	sem := make(chan struct{}, 3)
+	sem := make(chan struct{}, guidanceRefreshParallel)
 	var wg sync.WaitGroup
 	for bi, batch := range batches {
 		wg.Add(1)
@@ -378,7 +384,7 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 			for _, o := range byID {
 				fail("optimization "+truncateStr(o.Question, 60), fmt.Errorf("missing from the reviser's reply"))
 			}
-			notify(fmt.Sprintf("Updated answer optimizations: batch %d of %d.", bi+1, len(batches)))
+			notify(fmt.Sprintf("Updated answer optimizations: %d of %d.", bi+1, len(batches)))
 		}(bi, batch)
 	}
 

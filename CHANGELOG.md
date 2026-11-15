@@ -2,6 +2,7 @@
 
 ## 2026-11-15
 
+- **Update advice**: answer optimizations are revised one per call, four at a time (was four per call, three at a time); four per call could run past the provider's per-call time limit and leave those optimizations unchanged.
 - **LLM Test: time limit**: a slow provider can no longer sink a whole test. Answers now have their own deadline, short of the test's time limit, so there's always time to grade. Calls still unfinished at the deadline count as unanswered ("ran out of time", with a note saying how many per provider), and the test is scored and saved on the answers that came back. Before, a test that ran out of time ended with nothing saved. Providers answer three queries at a time (was two), and large tests (several runs plus web search) may take up to an hour (was 45 minutes).
 - **Report cache**: a cached report is now regenerated after a new LLM Test, after its advice is updated to current research, or when open to-dos are archived or completed (it used to look only at the analyses, the summary and the newest to-do).
 - **Research (November 2026 addendum)**: a second 2026 review adds 30 sources to the research the app cites, in the report's Supporting Research, the methodology page, the in-app methodology and `research.md` (new section 10).

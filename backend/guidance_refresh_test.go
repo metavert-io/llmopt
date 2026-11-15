@@ -108,7 +108,7 @@ func TestRefreshGuidance_UpdatesOldResultsOnly(t *testing.T) {
 	if len(res.Failed) > 0 || res.Updated != 8 || res.Archived != 1 {
 		t.Fatalf("result = %+v", res)
 	}
-	if c := atomic.LoadInt32(&calls); c != 2+1+1 { // two optimization batches, search, to-dos
+	if c := atomic.LoadInt32(&calls); c != 5/guidanceRefreshBatch+1+1 { // optimization batches, search, to-dos
 		t.Errorf("reviser calls = %d", c)
 	}
 
