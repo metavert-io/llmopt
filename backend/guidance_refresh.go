@@ -46,7 +46,15 @@ Current advice to use instead:
 - Build third-party presence where AI answers draw from: Wikipedia, independent review and comparison sites, YouTube creators, genuine community participation.
 - Allow the crawlers that fetch pages for AI answers (OAI-SearchBot, ChatGPT-User, Claude-SearchBot, PerplexityBot, Googlebot, Bingbot); blocking training crawlers is a business choice; check Cloudflare's AI bot setting.
 - Refresh key product, pricing and comparison pages at least yearly, with honest update dates.
-- Judge AI visibility by mention rate over repeated runs, per engine, against competitors of similar size.`
+- Judge AI visibility by mention rate over repeated runs, per engine, against competitors of similar size.
+
+How these show up in older results, and how to fix each (most results written before November 2026 contain several; check every improvement, recommendation, evidence line and summary sentence):
+1. A summary box ("Key Takeaways", "Quick Answer", "TL;DR", "At a glance", "summary box") recommended as an AI extraction, RAG or citation target. Rewrite as: make the page's title and opening paragraph answer the question directly, in two or three sentences with the specific facts. Keep the site-specific facts the item names.
+2. FAQ schema, FAQPage, or other Schema.org / structured-data markup recommended for AI citation, AI extraction, RAG or "LLM parsing". Remove the markup advice, or keep it only with its real purpose stated (search rich results, entity understanding). An FAQ page or section that answers real buyer questions in plain text is fine content advice; keep that part.
+3. Adding quotations (expert, clinician or customer quotes) or statistics to raise AI visibility, authority for AI, or the odds of citation. Rewrite as: back the answer with specific, sourced facts (figures, named studies, dates, prices) and say who wrote or medically reviewed the page. Naming a real reviewer stays; "add a quote to get cited" goes.
+4. Page speed, Core Web Vitals or "machine readability" framed as an AI citation lever. Remove the AI-citation framing.
+5. Any stated uplift ("+41%", "+33%", "2x more likely to be cited", "increases AI citation by X%"). Remove the figure.
+6. Evidence lines that count a missing FAQ schema, summary box, quotation or llms.txt against the site. Reword them as neutral observations or remove them.`
 
 // reviseInstructions frames every revision request.
 const reviseInstructions = `You are updating saved analysis results for one website so their advice matches current research. The analysis is not being re-run: keep its findings about this site.
@@ -54,12 +62,12 @@ const reviseInstructions = `You are updating saved analysis results for one webs
 %s
 
 Rules:
-- Change only text that relies on unsupported advice or outdated figures. Leave everything else exactly as written, word for word.
+- Change text that relies on unsupported advice or outdated figures, including the patterns listed above. Leave everything else exactly as written, word for word.
 - When an item recommends an unsupported tactic, rewrite it into the current advice that serves the same goal for this site, keeping its site-specific details; remove it only if nothing current serves that goal.
 - Keep priorities, dimensions and ids as given. Don't add new items, don't invent facts about the site, and don't change scores (there are none here).
-- In "changes", list each change briefly in plain words (for example: "Replaced 'add FAQ schema to win AI citations' with: match the page title to the buyer's question"). Use an empty list if nothing needed changing.
+- Record every change in a "changes" list, one short plain sentence each (for example: "Replaced 'add FAQ schema to win AI citations' with: match the page title to the buyer's question"). When the input has "items", put each item's own "changes" list inside that item. Use an empty list only if nothing in it needed changing.
 
-Return ONLY a JSON object with exactly the structure of the input plus "changes", no markdown fencing.
+Return ONLY a JSON object with exactly the structure of the input, with the "changes" lists added, no markdown fencing.
 
 %s:
 %s`
@@ -143,13 +151,19 @@ func revise(ctx context.Context, call reviseFunc, what string, payload, out any)
 	return fmt.Errorf("the reviser's reply couldn't be read")
 }
 
-// guidanceCurrent reports whether a result already follows the current rubric.
+// guidancePass versions the reviser's instructions: results revised with an
+// older pass are revised again. Pass 2 lists how retired advice shows up in
+// older results (pass 1 named the ideas only and left most of it in place).
+const guidancePass = 2
+
+// guidanceCurrent reports whether a result already follows the current rubric
+// and reviser instructions.
 func guidanceCurrent(resultRubric int, g *GuidanceRevision) bool {
-	return resultRubric >= scoringRubricVersion || (g != nil && g.Rubric >= scoringRubricVersion)
+	return resultRubric >= scoringRubricVersion || (g != nil && g.Rubric >= scoringRubricVersion && g.Pass >= guidancePass)
 }
 
 func guidanceMark(changes []string) *GuidanceRevision {
-	return &GuidanceRevision{Rubric: scoringRubricVersion, RevisedAt: time.Now(), Changes: changes}
+	return &GuidanceRevision{Rubric: scoringRubricVersion, Pass: guidancePass, RevisedAt: time.Now(), Changes: changes}
 }
 
 // keepList keeps the reviser's list unless it dropped everything from a list
@@ -162,6 +176,62 @@ func keepList[T any](orig, revised []T, changes []string) []T {
 		return []T{}
 	}
 	return revised
+}
+
+// diffNotes describes how a list changed, for when the reviser doesn't say:
+// items rewritten in place, removed, or added.
+func diffNotes(label string, before, after []string) []string {
+	short := func(t string) string { return `"` + truncateStr(strings.TrimSpace(t), 110) + `"` }
+	var notes []string
+	if len(before) == len(after) {
+		for i := range before {
+			if strings.TrimSpace(before[i]) != strings.TrimSpace(after[i]) {
+				notes = append(notes, fmt.Sprintf("%s: rewrote %s as %s", label, short(before[i]), short(after[i])))
+			}
+		}
+		return notes
+	}
+	inAfter, inBefore := map[string]bool{}, map[string]bool{}
+	for _, a := range after {
+		inAfter[strings.TrimSpace(a)] = true
+	}
+	for _, b := range before {
+		inBefore[strings.TrimSpace(b)] = true
+		if !inAfter[strings.TrimSpace(b)] {
+			notes = append(notes, fmt.Sprintf("%s: removed %s", label, short(b)))
+		}
+	}
+	for _, a := range after {
+		if !inBefore[strings.TrimSpace(a)] {
+			notes = append(notes, fmt.Sprintf("%s: added %s", label, short(a)))
+		}
+	}
+	return notes
+}
+
+// textNote notes a rewritten text field.
+func textNote(label, before, after string) []string {
+	if strings.TrimSpace(after) == "" || strings.TrimSpace(before) == strings.TrimSpace(after) {
+		return nil
+	}
+	return []string{"Revised the " + label}
+}
+
+// recActions lists recommendations' actions and expected impacts, to diff.
+func recActions[R any](recs []R, get func(R) string) []string {
+	out := make([]string, len(recs))
+	for i, r := range recs {
+		out[i] = get(r)
+	}
+	return out
+}
+
+// orNotes keeps the reviser's own notes, or the computed ones if it gave none.
+func orNotes(given, computed []string) []string {
+	if len(given) > 0 {
+		return given
+	}
+	return computed
 }
 
 func keepText(orig, revised string) string {
@@ -322,6 +392,7 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 	}
 
 	// Optimizations, guidanceRefreshBatch per call, guidanceRefreshParallel at a time.
+	optsDone := 0
 	var batches [][]Optimization
 	for i := 0; i < len(work.opts); i += guidanceRefreshBatch {
 		batches = append(batches, work.opts[i:min(i+guidanceRefreshBatch, len(work.opts))])
@@ -350,11 +421,15 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 					Recommendations:        r.Recommendations})
 			}
 			var out struct {
-				Items []optGuidance `json:"items"`
+				Items   []optGuidance `json:"items"`
+				Changes []string      `json:"changes"` // some replies list a single item's changes here
 			}
 			if err := revise(ctx, call, "Answer optimization results (one item per question)", in, &out); err != nil {
 				fail(fmt.Sprintf("optimizations batch %d", bi+1), err)
 				return
+			}
+			if len(out.Items) == 1 && len(out.Items[0].Changes) == 0 && len(out.Changes) > 0 {
+				out.Items[0].Changes = out.Changes
 			}
 			for _, it := range out.Items {
 				o, ok := byID[it.ID]
@@ -363,6 +438,28 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 				}
 				delete(byID, it.ID)
 				r := o.Result
+				var computed []string
+				for _, d := range []struct {
+					label         string
+					before, after dimGuidance
+				}{
+					{"Content authority", dimGuidance{r.ContentAuthority.Evidence, r.ContentAuthority.Improvements}, it.ContentAuthority},
+					{"Structure", dimGuidance{r.StructuralOptimization.Evidence, r.StructuralOptimization.Improvements}, it.StructuralOptimization},
+					{"Source authority", dimGuidance{r.SourceAuthority.Evidence, r.SourceAuthority.Improvements}, it.SourceAuthority},
+					{"Knowledge persistence", dimGuidance{r.KnowledgePersistence.Evidence, r.KnowledgePersistence.Improvements}, it.KnowledgePersistence},
+				} {
+					if d.after.Evidence != nil {
+						computed = append(computed, diffNotes(d.label+" finding", d.before.Evidence, d.after.Evidence)...)
+					}
+					if d.after.Improvements != nil {
+						computed = append(computed, diffNotes(d.label+" improvement", d.before.Improvements, d.after.Improvements)...)
+					}
+				}
+				if it.Recommendations != nil {
+					act := func(x Recommendation) string { return x.Action }
+					computed = append(computed, diffNotes("Recommendation", recActions(r.Recommendations, act), recActions(it.Recommendations, act))...)
+				}
+				it.Changes = orNotes(it.Changes, computed)
 				set := bson.D{
 					{Key: "result.contentAuthority.evidence", Value: keepList(r.ContentAuthority.Evidence, it.ContentAuthority.Evidence, it.Changes)},
 					{Key: "result.contentAuthority.improvements", Value: keepList(r.ContentAuthority.Improvements, it.ContentAuthority.Improvements, it.Changes)},
@@ -384,7 +481,11 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 			for _, o := range byID {
 				fail("optimization "+truncateStr(o.Question, 60), fmt.Errorf("missing from the reviser's reply"))
 			}
-			notify(fmt.Sprintf("Updated answer optimizations: %d of %d.", bi+1, len(batches)))
+			mu.Lock()
+			optsDone++
+			n := optsDone
+			mu.Unlock()
+			notify(fmt.Sprintf("Updated answer optimizations: %d of %d.", n, len(batches)))
 		}(bi, batch)
 	}
 
@@ -401,6 +502,28 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 			if err := revise(ctx, call, "Search visibility analysis", in, &out); err != nil {
 				fail("search analysis", err)
 				return
+			}
+			{
+				var computed []string
+				computed = append(computed, textNote("executive summary", r.ExecutiveSummary, out.ExecutiveSummary)...)
+				computed = append(computed, textNote("confidence note", r.ConfidenceNote, out.ConfidenceNote)...)
+				computed = append(computed, textNote("robots.txt summary", r.CrawlAccess.RobotsTxtPolicy, out.RobotsTxtPolicy)...)
+				for _, l := range []struct {
+					label         string
+					before, after []string
+				}{
+					{"AI Overview finding", r.AIOReadiness.Evidence, out.AIOEvidence}, {"Crawl finding", r.CrawlAccess.Evidence, out.CrawlEvidence},
+					{"Brand momentum finding", r.BrandMomentum.Evidence, out.MomentumEvidence}, {"Freshness finding", r.ContentFreshness.Evidence, out.FreshnessEvidence},
+				} {
+					if l.after != nil {
+						computed = append(computed, diffNotes(l.label, l.before, l.after)...)
+					}
+				}
+				if out.Recommendations != nil {
+					act := func(x SearchRecommendation) string { return x.Action }
+					computed = append(computed, diffNotes("Recommendation", recActions(r.Recommendations, act), recActions(out.Recommendations, act))...)
+				}
+				out.Changes = orNotes(out.Changes, computed)
 			}
 			set := bson.D{
 				{Key: "result.executiveSummary", Value: keepText(r.ExecutiveSummary, out.ExecutiveSummary)},
@@ -432,6 +555,14 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 				fail("YouTube analysis", err)
 				return
 			}
+			{
+				computed := append(textNote("executive summary", r.ExecutiveSummary, out.ExecutiveSummary), textNote("confidence note", r.ConfidenceNote, out.ConfidenceNote)...)
+				if out.Recommendations != nil {
+					act := func(x VideoRecommendation) string { return x.Action }
+					computed = append(computed, diffNotes("Recommendation", recActions(r.Recommendations, act), recActions(out.Recommendations, act))...)
+				}
+				out.Changes = orNotes(out.Changes, computed)
+			}
 			set := bson.D{
 				{Key: "result.executiveSummary", Value: keepText(r.ExecutiveSummary, out.ExecutiveSummary)},
 				{Key: "result.confidenceNote", Value: keepText(r.ConfidenceNote, out.ConfidenceNote)},
@@ -456,6 +587,14 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 			if err := revise(ctx, call, "Reddit authority analysis", in, &out); err != nil {
 				fail("Reddit analysis", err)
 				return
+			}
+			{
+				computed := append(textNote("executive summary", r.ExecutiveSummary, out.ExecutiveSummary), textNote("confidence note", r.ConfidenceNote, out.ConfidenceNote)...)
+				if out.Recommendations != nil {
+					act := func(x RedditRecommendation) string { return x.Action }
+					computed = append(computed, diffNotes("Recommendation", recActions(r.Recommendations, act), recActions(out.Recommendations, act))...)
+				}
+				out.Changes = orNotes(out.Changes, computed)
 			}
 			set := bson.D{
 				{Key: "result.executiveSummary", Value: keepText(r.ExecutiveSummary, out.ExecutiveSummary)},

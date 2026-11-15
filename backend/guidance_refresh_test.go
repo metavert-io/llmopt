@@ -196,3 +196,54 @@ func TestAdviceUpdatedInReport(t *testing.T) {
 		t.Error("the report must say when its advice was updated")
 	}
 }
+
+func TestDiffNotes(t *testing.T) {
+	if n := diffNotes("Rec", []string{"a", "b"}, []string{"a", "b"}); len(n) != 0 {
+		t.Errorf("no change: %v", n)
+	}
+	if n := diffNotes("Rec", []string{"a", "b"}, []string{"a", "c"}); len(n) != 1 || !strings.Contains(n[0], `rewrote "b" as "c"`) {
+		t.Errorf("rewrite: %v", n)
+	}
+	if n := diffNotes("Rec", []string{"a", "b"}, []string{"a"}); len(n) != 1 || !strings.Contains(n[0], `removed "b"`) {
+		t.Errorf("removal: %v", n)
+	}
+}
+
+// A reviser that edits without listing its changes still leaves notes, and
+// results revised with an older pass are revised again.
+func TestRefreshGuidance_ComputedNotesAndOlderPass(t *testing.T) {
+	db := testMongoDB(t)
+	ctx := context.Background()
+	const tenant, domain = "test-tenant", "pass.example"
+	faq := Recommendation{Priority: "high", Action: "Add an FAQ block with schema to win AI citations"}
+	old := &GuidanceRevision{Rubric: scoringRubricVersion, Pass: guidancePass - 1, RevisedAt: time.Now().Add(-time.Hour)}
+	res, err := db.Optimizations().InsertOne(ctx, Optimization{TenantID: tenant, Domain: domain, Question: "Q?", Guidance: old,
+		Result: OptimizationResult{Recommendations: []Recommendation{faq}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	filter := bson.D{{Key: "tenantId", Value: tenant}, {Key: "domain", Value: domain}}
+	work, _ := loadGuidanceWork(ctx, db, filter)
+	if work.status.Optimizations != 1 {
+		t.Fatalf("a result revised with an older pass must be pending: %+v", work.status)
+	}
+	var calls int32
+	silent := func(ctx context.Context, prompt string) (string, error) {
+		out, err := fakeReviser(&calls)(ctx, prompt)
+		var m map[string]any
+		json.Unmarshal([]byte(out), &m)
+		for _, it := range m["items"].([]any) {
+			delete(it.(map[string]any), "changes") // edits, but doesn't say so
+		}
+		b, _ := json.Marshal(m)
+		return string(b), err
+	}
+	if r := refreshGuidance(ctx, db, silent, work, tenant, domain, func(string) {}); r.Updated != 1 {
+		t.Fatalf("result = %+v", r)
+	}
+	var o Optimization
+	db.Optimizations().FindOne(ctx, bson.D{{Key: "_id", Value: res.InsertedID}}).Decode(&o)
+	if o.Guidance == nil || o.Guidance.Pass != guidancePass || len(o.Guidance.Changes) != 1 || !strings.Contains(o.Guidance.Changes[0], "Recommendation: rewrote") {
+		t.Errorf("guidance = %+v", o.Guidance)
+	}
+}
