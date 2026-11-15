@@ -134,12 +134,15 @@ func (p *OpenAIProvider) Stream(ctx context.Context, apiKey string, body []byte,
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == 429 || resp.StatusCode == 529 {
-		log.Printf("OpenAI API returned %d (overloaded/rate-limited)", resp.StatusCode)
-		return nil, ErrOverloaded
-	}
 	if resp.StatusCode != 200 {
 		errBody, _ := io.ReadAll(resp.Body)
+		if err := providerCreditError("OpenAI", errBody); err != nil {
+			return nil, err
+		}
+		if resp.StatusCode == 429 || resp.StatusCode == 529 {
+			log.Printf("OpenAI API returned %d (overloaded/rate-limited)", resp.StatusCode)
+			return nil, ErrOverloaded
+		}
 		return nil, fmt.Errorf("OpenAI API error (%d): %s", resp.StatusCode, string(errBody))
 	}
 

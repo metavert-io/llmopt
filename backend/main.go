@@ -735,6 +735,7 @@ const (
 	ErrCodeParseError    = "parse_error"
 	ErrCodeCancelled     = "cancelled"
 	ErrCodeStreamStalled = "stream_stalled"
+	ErrCodeAPICredits    = "api_credits"
 )
 
 // classifyError maps an error to one of the error code constants.
@@ -747,6 +748,11 @@ func classifyError(err error) string {
 	}
 	if errors.Is(err, ErrStreamStalled) {
 		return ErrCodeStreamStalled
+	}
+	var ce *creditError
+	var he *ProviderHTTPError
+	if errors.As(err, &ce) || (errors.As(err, &he) && isBillingMessage(strings.ToLower(he.Body))) {
+		return ErrCodeAPICredits
 	}
 	msg := err.Error()
 	if strings.Contains(msg, "context canceled") || strings.Contains(msg, "request cancelled") {
@@ -767,6 +773,8 @@ func userFriendlyError(code string) string {
 		return "The AI service returned an error. This is an upstream provider issue, not a problem with your account."
 	case ErrCodeAPIKeyInvalid:
 		return "Your API key was rejected by the provider. Please check your key in Settings."
+	case ErrCodeAPICredits:
+		return "Your AI provider account is out of credit, so this can't run. Add credit for the API key in Settings (for Anthropic: console.anthropic.com → Settings → Billing), then try again."
 	case ErrCodeCancelled:
 		return "Analysis was cancelled."
 	case ErrCodeStreamStalled:
@@ -1290,7 +1298,7 @@ func handleHealthCheck(apiKey string, mongoDB *MongoDB) http.HandlerFunc {
 		id, name string
 	}
 	models := []modelDef{
-		{"claude-sonnet-4-6", "Sonnet 4.6"},
+		{"claude-opus-5-5", "Opus 5.5"},
 		{"claude-haiku-4-5-20251001", "Haiku 4.5"},
 	}
 
