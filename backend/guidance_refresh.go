@@ -64,8 +64,14 @@ Return ONLY a JSON object with exactly the structure of the input plus "changes"
 %s:
 %s`
 
-// guidanceRefreshBatch is how many optimizations one revision call handles.
-const guidanceRefreshBatch = 4
+// guidanceRefreshBatch is how many optimizations one revision call handles,
+// and guidanceRefreshParallel how many calls run at once. The reviser echoes
+// every list it's given, so one optimization per call keeps each reply well
+// inside the providers' per-call time limit (four per call ran past it).
+const (
+	guidanceRefreshBatch    = 1
+	guidanceRefreshParallel = 4
+)
 
 type dimGuidance struct {
 	Evidence     []string `json:"evidence"`
@@ -315,12 +321,12 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 		mu.Unlock()
 	}
 
-	// Optimizations, a few per call, three calls at a time.
+	// Optimizations, guidanceRefreshBatch per call, guidanceRefreshParallel at a time.
 	var batches [][]Optimization
 	for i := 0; i < len(work.opts); i += guidanceRefreshBatch {
 		batches = append(batches, work.opts[i:min(i+guidanceRefreshBatch, len(work.opts))])
 	}
-	sem := make(chan struct{}, 3)
+	sem := make(chan struct{}, guidanceRefreshParallel)
 	var wg sync.WaitGroup
 	for bi, batch := range batches {
 		wg.Add(1)
@@ -378,7 +384,7 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 			for _, o := range byID {
 				fail("optimization "+truncateStr(o.Question, 60), fmt.Errorf("missing from the reviser's reply"))
 			}
-			notify(fmt.Sprintf("Updated answer optimizations: batch %d of %d.", bi+1, len(batches)))
+			notify(fmt.Sprintf("Updated answer optimizations: %d of %d.", bi+1, len(batches)))
 		}(bi, batch)
 	}
 
@@ -467,59 +473,66 @@ func refreshGuidance(ctx context.Context, mongoDB *MongoDB, call reviseFunc, wor
 	}
 	wg.Wait()
 
-	// Open to-dos, after the results they came from.
+	// Open to-dos, after the results they came from, 20 per call, in parallel.
+	var todoWG sync.WaitGroup
 	for i := 0; i < len(work.todos); i += 20 {
-		batch := work.todos[i:min(i+20, len(work.todos))]
-		byID := map[string]TodoItem{}
-		var in struct {
-			Items []todoGuidance `json:"items"`
-		}
-		for _, t := range batch {
-			byID[t.ID.Hex()] = t
-			in.Items = append(in.Items, todoGuidance{ID: t.ID.Hex(), Action: t.Action, Summary: t.Summary, ExpectedImpact: t.ExpectedImpact})
-		}
-		var out struct {
-			Items []todoGuidance `json:"items"`
-		}
-		if err := revise(ctx, call, `Open to-do items. For each, set "decision" to "keep" (unchanged), "rewrite" (with the rewritten action, summary and expected_impact) or "drop" (it only pursues unsupported advice), and give a short "reason" for a rewrite or drop. "changes" may stay empty here`, in, &out); err != nil {
-			fail(fmt.Sprintf("to-dos %d-%d", i+1, i+len(batch)), err)
-			continue
-		}
-		for _, it := range out.Items {
-			t, ok := byID[it.ID]
-			if !ok {
-				continue
+		todoWG.Add(1)
+		go func(i int, batch []TodoItem) {
+			defer todoWG.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			byID := map[string]TodoItem{}
+			var in struct {
+				Items []todoGuidance `json:"items"`
 			}
-			delete(byID, it.ID)
-			var set bson.D
-			var changes []string
-			switch it.Decision {
-			case "drop":
-				changes = []string{"Archived: " + keepText("advice the 2026 research doesn't support", it.Reason)}
-				set = bson.D{{Key: "status", Value: "archived"}, {Key: "archivedAt", Value: time.Now()}}
-				mu.Lock()
-				res.Archived++
-				mu.Unlock()
-			case "rewrite":
-				changes = []string{"Rewritten: " + keepText("updated to current advice", it.Reason)}
-				set = bson.D{
-					{Key: "action", Value: keepText(t.Action, it.Action)},
-					{Key: "summary", Value: keepText(t.Summary, it.Summary)},
-					{Key: "expectedImpact", Value: keepText(t.ExpectedImpact, it.ExpectedImpact)},
+			for _, t := range batch {
+				byID[t.ID.Hex()] = t
+				in.Items = append(in.Items, todoGuidance{ID: t.ID.Hex(), Action: t.Action, Summary: t.Summary, ExpectedImpact: t.ExpectedImpact})
+			}
+			var out struct {
+				Items []todoGuidance `json:"items"`
+			}
+			if err := revise(ctx, call, `Open to-do items. For each, set "decision" to "keep" (unchanged), "rewrite" (with the rewritten action, summary and expected_impact) or "drop" (it only pursues unsupported advice), and give a short "reason" for a rewrite or drop. "changes" may stay empty here`, in, &out); err != nil {
+				fail(fmt.Sprintf("to-dos %d-%d", i+1, i+len(batch)), err)
+				return
+			}
+			for _, it := range out.Items {
+				t, ok := byID[it.ID]
+				if !ok {
+					continue
 				}
+				delete(byID, it.ID)
+				var set bson.D
+				var changes []string
+				switch it.Decision {
+				case "drop":
+					changes = []string{"Archived: " + keepText("advice the 2026 research doesn't support", it.Reason)}
+					set = bson.D{{Key: "status", Value: "archived"}, {Key: "archivedAt", Value: time.Now()}}
+					mu.Lock()
+					res.Archived++
+					mu.Unlock()
+				case "rewrite":
+					changes = []string{"Rewritten: " + keepText("updated to current advice", it.Reason)}
+					set = bson.D{
+						{Key: "action", Value: keepText(t.Action, it.Action)},
+						{Key: "summary", Value: keepText(t.Summary, it.Summary)},
+						{Key: "expectedImpact", Value: keepText(t.ExpectedImpact, it.ExpectedImpact)},
+					}
+				}
+				set = append(set, bson.E{Key: "guidance", Value: guidanceMark(changes)})
+				if err := applyGuidance(ctx, mongoDB, "todos", t.ID, tenantID, domain, set); err != nil {
+					fail("to-do "+truncateStr(t.Action, 60), err)
+					continue
+				}
+				done(changes)
 			}
-			set = append(set, bson.E{Key: "guidance", Value: guidanceMark(changes)})
-			if err := applyGuidance(ctx, mongoDB, "todos", t.ID, tenantID, domain, set); err != nil {
-				fail("to-do "+truncateStr(t.Action, 60), err)
-				continue
+			for _, t := range byID {
+				fail("to-do "+truncateStr(t.Action, 60), fmt.Errorf("missing from the reviser's reply"))
 			}
-			done(changes)
-		}
-		for _, t := range byID {
-			fail("to-do "+truncateStr(t.Action, 60), fmt.Errorf("missing from the reviser's reply"))
-		}
-		notify(fmt.Sprintf("Updated to-dos %d–%d of %d.", i+1, i+len(batch), len(work.todos)))
+			notify(fmt.Sprintf("Updated to-dos %d–%d of %d.", i+1, i+len(batch), len(work.todos)))
+		}(i, work.todos[i:min(i+20, len(work.todos))])
 	}
+	todoWG.Wait()
 	return res
 }
 
