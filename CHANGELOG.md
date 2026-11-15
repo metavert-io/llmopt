@@ -2,6 +2,7 @@
 
 ## 2026-11-15
 
+- **Report cache**: a cached report is now regenerated after a new LLM Test, after its advice is updated to current research, or when open to-dos are archived or completed (it used to look only at the analyses, the summary and the newest to-do).
 - **Research (November 2026 addendum)**: a second 2026 review adds 30 sources to the research the app cites, in the report's Supporting Research, the methodology page, the in-app methodology and `research.md` (new section 10).
   - **Added:**
     - **What changes citation:** comparing pages of the same website, FAQ blocks, summary boxes and schema showed no effect, while a title and key paragraph that match the question did. The 2023 quotation and statistics levers moved citation on none of ten current engine families. Pages with figures, definitions, comparisons and steps shaped answers more.

@@ -95,6 +95,31 @@ func computeFingerprint(ctx context.Context, mongoDB *MongoDB, domain string, te
 	if err := mongoDB.Todos().FindOne(ctx, todoFilter, todoOpts).Decode(&latestTodo); err == nil {
 		fp.LatestTodoAt = &latestTodo.CreatedAt
 	}
+	if n, err := mongoDB.Todos().CountDocuments(ctx, todoFilter); err == nil {
+		fp.OpenTodoCount = int(n)
+	}
+
+	// Latest LLM Test (not a competitor test)
+	var lt struct {
+		GeneratedAt time.Time `bson:"generatedAt"`
+	}
+	if err := mongoDB.LLMTests().FindOne(ctx, filter(bson.E{Key: "competitorOf", Value: bson.D{{Key: "$in", Value: bson.A{"", nil}}}}),
+		options.FindOne().SetSort(bson.D{{Key: "generatedAt", Value: -1}}).SetProjection(bson.D{{Key: "generatedAt", Value: 1}})).Decode(&lt); err == nil {
+		fp.LLMTestGeneratedAt = &lt.GeneratedAt
+	}
+
+	// Latest advice update in any result or to-do
+	for _, c := range []*mongo.Collection{mongoDB.Optimizations(), mongoDB.SearchAnalyses(), mongoDB.VideoAnalyses(), mongoDB.RedditAnalyses(), mongoDB.Todos()} {
+		var g struct {
+			Guidance *GuidanceRevision `bson:"guidance"`
+		}
+		if c.FindOne(ctx, filter(bson.E{Key: "guidance.revisedAt", Value: bson.D{{Key: "$exists", Value: true}}}),
+			options.FindOne().SetSort(bson.D{{Key: "guidance.revisedAt", Value: -1}}).SetProjection(bson.D{{Key: "guidance.revisedAt", Value: 1}})).Decode(&g) == nil &&
+			g.Guidance != nil && (fp.GuidanceRevisedAt == nil || g.Guidance.RevisedAt.After(*fp.GuidanceRevisedAt)) {
+			t := g.Guidance.RevisedAt
+			fp.GuidanceRevisedAt = &t
+		}
+	}
 
 	return fp
 }
@@ -116,6 +141,9 @@ func fingerprintEqual(a, b ReportFingerprint) bool {
 		timeEq(a.SearchGeneratedAt, b.SearchGeneratedAt) &&
 		timeEq(a.SummaryGeneratedAt, b.SummaryGeneratedAt) &&
 		timeEq(a.LatestTodoAt, b.LatestTodoAt) &&
+		timeEq(a.LLMTestGeneratedAt, b.LLMTestGeneratedAt) &&
+		timeEq(a.GuidanceRevisedAt, b.GuidanceRevisedAt) &&
+		a.OpenTodoCount == b.OpenTodoCount &&
 		a.OptimizationCount == b.OptimizationCount &&
 		a.AnalysisExists == b.AnalysisExists &&
 		a.VideoExists == b.VideoExists &&
