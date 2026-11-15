@@ -8605,13 +8605,15 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 		if req.WebSearch {
 			passes++
 		}
-		budget := time.Duration(passes) * 15 * time.Minute
-		if budget > 45*time.Minute {
-			budget = 45 * time.Minute
-		}
+		budget, answerBudget := llmTestTimes(passes)
 		ctx, cancel := context.WithTimeout(r.Context(), budget)
 		defer cancel()
 		r = r.WithContext(ctx)
+		// Answers get their own deadline, short of the whole budget, so a slow
+		// provider can't use up the time the grading needs: calls still out at
+		// the deadline count as unanswered and the test is scored on the rest.
+		answerCtx, answerCancel := context.WithTimeout(ctx, answerBudget)
+		defer answerCancel()
 		req.Domain = normalizeDomain(req.Domain)
 		if req.Domain == "" {
 			sendSSE(w, flusher, "error", map[string]string{"message": "Domain is required"})
@@ -8772,7 +8774,18 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 					defer lanes.Done()
 					for wk := range queue {
 						query := req.Queries[wk.qi].Query
-						resp, model, err, skipped := run.ask(r.Context(), query, 4096, wk.search)
+						var resp webSearchAnswer
+						var model ModelDef
+						var err error
+						skipped := answerCtx.Err() != nil
+						if skipped {
+							model, err = run.currentModel(), errTestOutOfTime
+						} else {
+							resp, model, err, skipped = run.ask(answerCtx, query, 4096, wk.search)
+							if err != nil && answerCtx.Err() != nil && r.Context().Err() == nil {
+								err = errTestOutOfTime
+							}
+						}
 						run.record(err, wk.search)
 						respMu.Lock()
 						completedCalls++
@@ -8811,7 +8824,25 @@ func handleLLMTest(mongoDB *MongoDB, encKey []byte, fallbackKey string, saasEnab
 		}
 		lanes.Wait()
 		if r.Context().Err() != nil {
-			return // client went away or the budget ran out
+			return // client went away
+		}
+		if answerCtx.Err() != nil {
+			late := map[string]int{}
+			var order []string
+			for _, resp := range responses {
+				if errors.Is(resp.err, errTestOutOfTime) {
+					if late[resp.providerName] == 0 {
+						order = append(order, resp.providerName)
+					}
+					late[resp.providerName]++
+				}
+			}
+			var parts []string
+			for _, name := range order {
+				parts = append(parts, fmt.Sprintf("%s %d", name, late[name]))
+			}
+			notify(fmt.Sprintf("Time's up for answers after %s: %s left unanswered. Scoring the answers that came back.",
+				answerBudget.Round(time.Minute), strings.Join(parts, ", ")))
 		}
 
 		// Providers that answered nothing (from memory) are reported, not
