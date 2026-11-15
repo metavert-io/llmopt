@@ -2,6 +2,22 @@
 
 ## 2026-11-15
 
+- **Research (November 2026 addendum)**: a second 2026 review adds 30 sources to the research the app cites, in the report's Supporting Research, the methodology page, the in-app methodology and `research.md` (new section 10).
+  - **Added:**
+    - **What changes citation:** comparing pages of the same website, FAQ blocks, summary boxes and schema showed no effect, while a title and key paragraph that match the question did. The 2023 quotation and statistics levers moved citation on none of ten current engine families. Pages with figures, definitions, comparisons and steps shaped answers more.
+    - **What models remember:** assistants name brands they already know, and well-known brands are favored, so brands are best compared with peers of similar size. Owned pages still matter: a brand is far more likely to be named when one of its own pages is retrieved.
+    - **Lists:** self-ranked "best X" lists can help competitors.
+    - **Measurement:** run-to-run variance, and how many runs a comparison needs. Sentiment is the least stable measure, and API and consumer-app answers cite different sites.
+    - **Accuracy:** grounding varies by topic (about 43% of cited statements unsupported in health answers), and pricing errors are common.
+    - **Crawlers:** robots.txt isn't always obeyed, and crawler traffic is now mostly for training.
+    - **Clicks:** field experiments show AI Overviews and AI Mode cut clicks.
+  - **Corrected:**
+    - **Google-Extended:** Google says it doesn't affect Google Search. The association with less AI Overview retrieval is now presented as an association.
+    - **Reddit:** per-engine shares are dated, disputed figures, and assistants read Reddit far more than they cite it.
+    - **YouTube:** it leads mainly through Google's AI surfaces.
+    - **Schema:** it shows no lift "on live engines".
+  - **Methodology page:** the framework descriptions match the new criteria. FAQ blocks and summary boxes earn no credit by themselves, a brand's own self-ranked lists don't count as coverage, and page scores measure quality and fit for the question.
+  - **README:** describes the current score weights, the LLM Test's repeated runs and web-search pass, and the research that replaced the "+41% quotations" claim.
 - **Update advice to current research**: saved results whose advice predates the current research can be updated without re-running them. A banner under a domain's scorecard says what can be updated; "Update advice" has the account's AI provider rewrite only the advice the research no longer supports, such as FAQ blocks or schema as citation levers, llms.txt, unblocking Google-Extended for AI Overviews, or outdated figures. It covers answer optimizations (improvements, evidence and recommendations), the search, YouTube and Reddit analyses (summaries, evidence and recommendations) and open to-dos (rewritten, or archived when they only pursued unsupported advice). Scores and site findings stay as measured. Each document is copied to a backup collection before it changes, and each updated result shows what changed. The report notes when its advice was updated. `GET`/`POST /api/domains/{domain}/guidance`.
 - **Answer optimization (2026 research follow-up)**: Structural Optimization now scores whether a page's title and key paragraph match the question as buyers ask it, the page property that held up when comparing pages within one site, and no longer credits FAQ blocks, summary boxes or page speed by themselves (they only appeared to help across different websites). Content Authority names the evidence assistants actually use in answers: figures, definitions, comparisons, steps and explicit prices. Pricing and plan details are treated as the claims AI gets wrong most often. A brand's own "best X" lists don't count as third-party coverage. Recommendations follow suit. Page scores are described as quality and fit for the question, not a predicted citation rate. These criteria apply to optimizations run from now on.
 - **LLM Test**:
