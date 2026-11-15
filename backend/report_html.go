@@ -111,6 +111,9 @@ type reportView struct {
 	AnswerRecs   []reportRec      // the most important answer fixes
 	MoreAnswers  int              // answer fixes not shown (they are on each question and in the To-Do list)
 	RecCount     int
+	// AdviceUpdated is when the advice in these results was last updated to
+	// the current research rubric (guidance_refresh.go), or "".
+	AdviceUpdated string
 	Research     []string
 	Bibliography []reportBib
 }
@@ -506,6 +509,7 @@ func buildReportView(d reportData, now time.Time, mode string) reportView {
 	// Recommendations
 	recs := collectReportRecs(d)
 	v.RecCount = len(recs)
+	v.AdviceUpdated = adviceUpdated(d)
 	var cross, answers []reportRec
 	for _, r := range recs {
 		if r.Source == "Answers" {
@@ -838,4 +842,31 @@ func generateReportPDF(ctx context.Context, d reportData) (pdf []byte, engine st
 	pdf, err = buildReportPDF(d.Domain, d.BrandProfile, d.Analysis, d.Optimizations, d.VideoAnalysis, d.RedditAnalysis,
 		d.SearchAnalysis, d.LLMTest, d.Summary, d.Todos)
 	return pdf, "plain", err
+}
+
+// adviceUpdated returns the latest date any result's advice was updated to
+// the current research rubric, as shown in the report, or "".
+func adviceUpdated(d reportData) string {
+	var latest time.Time
+	note := func(g *GuidanceRevision) {
+		if g != nil && g.Rubric >= scoringRubricVersion && g.RevisedAt.After(latest) {
+			latest = g.RevisedAt
+		}
+	}
+	for _, o := range d.Optimizations {
+		note(o.Guidance)
+	}
+	if d.SearchAnalysis != nil {
+		note(d.SearchAnalysis.Guidance)
+	}
+	if d.VideoAnalysis != nil {
+		note(d.VideoAnalysis.Guidance)
+	}
+	if d.RedditAnalysis != nil {
+		note(d.RedditAnalysis.Guidance)
+	}
+	if latest.IsZero() {
+		return ""
+	}
+	return latest.Format("January 2, 2006")
 }

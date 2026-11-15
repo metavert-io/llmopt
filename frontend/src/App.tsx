@@ -137,6 +137,7 @@ interface FullOptimization {
   brand_context_used: boolean
   brand_profile_updated_at?: string
   created_at: string
+  guidance?: GuidanceRevisionInfo
 }
 
 interface SummaryTheme {
@@ -423,6 +424,7 @@ interface VideoAnalysis {
   model: string
   brand_context_used: boolean
   generated_at: string
+  guidance?: GuidanceRevisionInfo
 }
 
 interface VideoAnalysisSummary {
@@ -570,6 +572,7 @@ interface RedditAnalysis {
   model: string
   brand_context_used: boolean
   generated_at: string
+  guidance?: GuidanceRevisionInfo
 }
 
 interface RedditAnalysisSummary {
@@ -603,6 +606,7 @@ interface SearchAnalysis {
   model: string
   brand_context_used: boolean
   generated_at: string
+  guidance?: GuidanceRevisionInfo
 }
 
 interface SearchAnalysisSummary {
@@ -755,6 +759,34 @@ function safePathname(urlStr: string): string {
   }
 }
 
+// GuidanceRevisionInfo: the result's advice was updated to a newer research
+// rubric without re-running it (scores unchanged).
+interface GuidanceRevisionInfo { rubric: number; revised_at: string; changes?: string[] }
+
+interface GuidanceStatus { optimizations: number; search: number; video: number; reddit: number; todos: number; pending: number; revised: number; revised_at?: string; rubric: number }
+
+// GuidanceNote says a result's advice was updated for the 2026 research, with
+// what changed on request.
+function GuidanceNote({ g }: { g: GuidanceRevisionInfo }) {
+  const [open, setOpen] = useState(false)
+  const changes = g.changes || []
+  return (
+    <div className="bg-primary-500/5 border border-primary-500/20 rounded-xl px-4 py-2.5 text-xs">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-dark-400"><span className="text-primary-400 font-medium">Advice updated for the 2026 research</span> on {fmtDate(g.revised_at)}. Scores are unchanged; advice the research no longer supports was rewritten.</span>
+        {changes.length > 0 && (
+          <button onClick={() => setOpen(o => !o)} className="text-primary-400 hover:text-primary-300 cursor-pointer whitespace-nowrap">{open ? 'Hide' : `${changes.length} change${changes.length !== 1 ? 's' : ''}`}</button>
+        )}
+      </div>
+      {open && (
+        <ul className="mt-2 space-y-1 text-dark-400 list-disc pl-4">
+          {changes.map((c, i) => <li key={i}>{c}</li>)}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 // groupTestAnswers puts one query's answers together per assistant: its
 // remembered runs in one group, its web-search answer in another.
 function groupTestAnswers(results: TestProviderResult[]): { key: string; search: boolean; items: TestProviderResult[] }[] {
@@ -874,6 +906,10 @@ export default function App() {
   const [activeSummary, setActiveSummary] = useState<DomainSummary | null>(null)
   const [activeSummaryStale, setActiveSummaryStale] = useState(false)
   const [activeSummaryRescored, setActiveSummaryRescored] = useState(false)
+  // Saved results whose advice predates the current research rubric.
+  const [guidanceStatus, setGuidanceStatus] = useState<GuidanceStatus | null>(null)
+  const [guidanceRunning, setGuidanceRunning] = useState(false)
+  const [guidanceMessage, setGuidanceMessage] = useState('')
   const [generatingSummary, setGeneratingSummary] = useState(false)
   const [summaryMessages, setSummaryMessages] = useState<string[]>([])
 
@@ -3170,12 +3206,64 @@ export default function App() {
         if (data) setVisibilityScore(data)
         else setVisibilityScore(null)
       }).catch(() => setVisibilityScore(null))
+      apiFetch(`/api/domains/${encodeURIComponent(selectedDomain)}/guidance`).then(r => r.ok ? r.json() : null).then(data => {
+        setGuidanceStatus(data)
+      }).catch(() => setGuidanceStatus(null))
     } else {
       setActiveSummary(null)
       setActiveSummaryStale(false)
       setVisibilityScore(null)
     }
   }, [selectedDomain, loadSummaryForDomain, visibilityScoreVersion])
+
+  // Update the advice in the domain's saved results to the current research.
+  const refreshGuidance = useCallback(async () => {
+    if (!selectedDomain || guidanceRunning) return
+    setGuidanceRunning(true)
+    setGuidanceMessage('Starting...')
+    try {
+      const res = await apiFetchWithWake(`/api/domains/${encodeURIComponent(selectedDomain)}/guidance`, { method: 'POST' }, () => setGuidanceMessage('Waking up the server...'))
+      if (!res.ok || !res.body) {
+        setGuidanceMessage(res.ok ? 'No progress stream; try again.' : await describeHttpError(res, 'advice update'))
+        setGuidanceRunning(false)
+        return
+      }
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finished = false
+      while (!finished) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+        let idx
+        while ((idx = buffer.indexOf('\n\n')) !== -1) {
+          const chunk = buffer.slice(0, idx)
+          buffer = buffer.slice(idx + 2)
+          let ev = '', data = ''
+          for (const line of chunk.split('\n')) {
+            if (line.startsWith('event: ')) ev = line.slice(7)
+            else if (line.startsWith('data: ')) data = line.slice(6)
+          }
+          if (!data) continue
+          try {
+            const parsed = JSON.parse(data)
+            if (ev === 'status') setGuidanceMessage(parsed.message)
+            else if (ev === 'error') { setGuidanceMessage(parsed.message || 'The update failed.'); finished = true }
+            else if (ev === 'done') {
+              const r = parsed.result || {}
+              setGuidanceMessage(`Updated ${r.updated || 0} results (${r.changes || 0} changes${r.archived_todos ? `, ${r.archived_todos} to-dos archived` : ''})${r.failed?.length ? `; couldn't update: ${r.failed.join(', ')}` : ''}. Reloading...`)
+              finished = true
+              setTimeout(() => window.location.reload(), 1500)
+            }
+          } catch { /* ignore a malformed event */ }
+        }
+      }
+    } catch {
+      setGuidanceMessage('The update was interrupted; try again.')
+    }
+    setGuidanceRunning(false)
+  }, [selectedDomain, guidanceRunning])
 
   const discoverCompetitors = useCallback(async () => {
     if (!brandDomain.trim()) return
@@ -5424,6 +5512,30 @@ curl -X PATCH \\
                   </div>
                 )}
 
+                {/* Advice written before the current research rubric */}
+                {!readOnly && guidanceStatus && (guidanceStatus.pending > 0 || guidanceRunning) && (
+                  <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl px-4 py-3 flex items-center justify-between gap-4 flex-wrap">
+                    <div className="text-xs text-amber-200/90 min-w-0">
+                      <span className="font-medium text-amber-300">Some advice predates the 2026 research.</span>{' '}
+                      {guidanceRunning || guidanceMessage
+                        ? <span className="text-dark-300">{guidanceMessage}</span>
+                        : <span>{[
+                            guidanceStatus.optimizations ? `${guidanceStatus.optimizations} optimization${guidanceStatus.optimizations !== 1 ? 's' : ''}` : '',
+                            guidanceStatus.search ? 'search' : '', guidanceStatus.video ? 'YouTube' : '', guidanceStatus.reddit ? 'Reddit' : '',
+                            guidanceStatus.todos ? `${guidanceStatus.todos} to-do${guidanceStatus.todos !== 1 ? 's' : ''}` : '',
+                          ].filter(Boolean).join(', ')} can be updated: scores stay, and advice the research no longer supports (FAQ blocks as a citation lever, llms.txt, Google-Extended for AI Overviews and similar) is rewritten. Originals are kept.</span>}
+                    </div>
+                    <button
+                      onClick={refreshGuidance}
+                      disabled={guidanceRunning}
+                      className={`text-xs px-3 py-1.5 rounded-lg border whitespace-nowrap transition-all ${guidanceRunning ? 'bg-dark-800 border-dark-700 text-dark-500 cursor-wait' : 'bg-amber-500/20 border-amber-500/30 text-amber-300 hover:bg-amber-500/30 cursor-pointer'}`}
+                    >{guidanceRunning ? 'Updating...' : 'Update advice'}</button>
+                  </div>
+                )}
+                {guidanceStatus && guidanceStatus.pending === 0 && guidanceStatus.revised_at && !guidanceRunning && (
+                  <p className="text-dark-500 text-xs">Advice in this domain's results was updated for the 2026 research on {fmtDate(guidanceStatus.revised_at)}.</p>
+                )}
+
                 {/* Result metadata bar */}
                 {resultMeta && (
                   <div className="flex items-center justify-between flex-wrap gap-3">
@@ -6149,6 +6261,7 @@ curl -X PATCH \\
                     <p className="text-dark-400 text-sm">
                       How well this page answers the question for AI assistants, from content authority, structure, source authority and knowledge persistence. It measures quality and fit for the question, not a predicted citation rate.
                     </p>
+                    {selectedOpt?.guidance && <div className="mt-2"><GuidanceNote g={selectedOpt.guidance} /></div>}
                   </div>
                 </div>
 
@@ -8803,6 +8916,8 @@ curl -X PATCH \\
                   </div>
                 )}
 
+                {videoAnalysis.guidance && <GuidanceNote g={videoAnalysis.guidance} />}
+
                 {/* Unified 4-Pillar Report */}
                 {videoAnalysis.result && (() => {
                   const r = videoAnalysis.result
@@ -9638,6 +9753,7 @@ curl -X PATCH \\
 
               return (
                 <div className="space-y-6">
+                  {redditAnalysis.guidance && <GuidanceNote g={redditAnalysis.guidance} />}
                   {/* Header — back button + actions (matches YouTube pattern) */}
                   <div className="flex items-center justify-between">
                     <button
@@ -10134,6 +10250,8 @@ curl -X PATCH \\
                     </div>
                     <div className={`text-dark-300 text-sm leading-relaxed whitespace-pre-line ${!expandedSections.has('search-summary') ? 'line-clamp-3' : ''}`}>{r.executive_summary}</div>
                   </div>
+
+                  {searchAnalysis.guidance && <GuidanceNote g={searchAnalysis.guidance} />}
 
                   {/* Scored before the 2026 rubric: re-weighted now, criteria on re-run */}
                   {(r.rubric_version ?? 0) < 2 && (
