@@ -7,6 +7,8 @@
 
 LLM Optimizer is an AI visibility intelligence platform. It analyzes how large language models and AI search engines perceive, cite, and recommend brands — then provides research-backed optimization strategies to improve that visibility.
 
+https://github.com/user-attachments/assets/9ae56cae-e287-463f-ba18-c8e0aee916e9
+
 ChatGPT, Claude, Gemini, Perplexity, and Google AI Overviews are replacing traditional search for millions of people. The signals that determine whether an AI recommends your brand are fundamentally different from traditional SEO: earned media coverage, transcript quality, content structure, training data frequency, and citation network dynamics matter more than backlinks and keyword density. LLM Optimizer measures these signals across five analysis dimensions and produces a composite AI Visibility Score (0-100) with prioritized, actionable recommendations.
 
 ## What It Analyzes
